@@ -52,8 +52,7 @@ function fetchOpenRouter(prompt, imageUrl) {
 
 (async function () {
   const browser = await chromium.launch({
-    headless: false,
-    slowMo: 50
+    headless: false
   });
 
   const context = await browser.newContext({
@@ -72,7 +71,7 @@ function fetchOpenRouter(prompt, imageUrl) {
   await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', { state: 'visible', timeout: 30000 });
   const posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all(); 
 
-  const maxPosts = 1;
+  const maxPosts = 6;
   let postData = [];
 
   for (let i = 0; i < Math.min(posts.length, maxPosts); i++) {
@@ -101,7 +100,6 @@ function fetchOpenRouter(prompt, imageUrl) {
 
     try {
       await postPage.waitForSelector('main', { timeout: 15000 });
-      await postPage.waitForTimeout(3000);
 
       const stats = await postPage.evaluate(() => {
         let likes = 'N/A';
@@ -185,6 +183,5 @@ function fetchOpenRouter(prompt, imageUrl) {
 
   console.log(postData);
 
-  await page.waitForTimeout(10000);
   await browser.close();
 })();
