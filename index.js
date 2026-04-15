@@ -1,4 +1,45 @@
+require('dotenv').config();
 const { chromium } = require('playwright');
+const https = require('https');
+
+function fetchOpenRouter(prompt) {
+    return new Promise((resolve, reject) => {
+        const apiKey = process.env.OPENROUTER_API_KEY || '';
+        const data = JSON.stringify({
+            model: 'google/gemma-4-26b-a4b-it:free',
+            messages: [{ role: 'user', content: prompt }]
+        });
+
+        const req = https.request('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data)
+            }
+        }, (res) => {
+            let body = '';
+            res.on('data', chunk => body += chunk);
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(body);
+                    resolve(parsed.choices?.[0]?.message?.content || 'No explanation generated');
+                } catch (e) {
+                    console.error('Error parsing OpenRouter response:', e);
+                    resolve('Explanation Parse Error');
+                }
+            });
+        });
+
+        req.on('error', (e) => {
+            console.error('Network error while fetching OpenRouter response:', e);
+            resolve('Explanation Network Error');
+        });
+        req.write(data);
+        req.end();
+    });
+}
+
 
 (async function () {
   const browser = await chromium.launch({
@@ -22,7 +63,7 @@ const { chromium } = require('playwright');
   await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', { state: 'visible', timeout: 30000 });
   const posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all(); 
 
-  const maxPosts = 6;
+  const maxPosts = 1;
   let postData = [];
 
   for (let i = 0; i < Math.min(posts.length, maxPosts); i++) {
@@ -56,6 +97,20 @@ const { chromium } = require('playwright');
       const stats = await postPage.evaluate(() => {
         let likes = 'N/A';
         let comments = 'N/A';
+        let captionText = '';
+        
+        const h1Tags = document.querySelectorAll('h1');
+        for (const h1 of h1Tags) {
+            if (h1.innerText && h1.innerText.trim().length > 0 && h1.innerText !== 'Instagram' && !h1.innerText.includes('Log in')) {
+                captionText = h1.innerText.trim();
+                break;
+            }
+        }
+        
+        if (!captionText) {
+            const metaTitle = document.querySelector('meta[property="og:title"]');
+            if (metaTitle) captionText = metaTitle.content;
+        }
 
         const text = document.body.innerText;
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -99,11 +154,17 @@ const { chromium } = require('playwright');
             }
         }
 
-        return { likes, comments };
+        return { likes, comments, captionText };
       });
 
       postData[i].likes = stats.likes;
       postData[i].comments = stats.comments;
+      postData[i].caption = stats.captionText || 'No caption';
+      
+      const promptText = `Explain in one short line what this Instagram post is about based on its text: "${postData[i].caption}"`;
+      console.log('Fetching explanation from OpenRouter...');
+      const explanation = await fetchOpenRouter(promptText);
+      postData[i].explanation = explanation.trim();
     } catch (e) {
       console.log('Could not extract likes/comments for ' + postData[i].link + ':', e.message);
       postData[i].likes = 'N/A';
