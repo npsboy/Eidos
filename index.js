@@ -86,9 +86,11 @@ function fetchOpenRouter(prompt, imageUrl) {
     }
 
     if (link) {
+      const type = link.includes('/reel/') ? 'reel' : 'post';
       postData.push({
         link: 'https://www.instagram.com' + link,
-        img
+        img,
+        type
       });
     }
   }
@@ -105,6 +107,14 @@ function fetchOpenRouter(prompt, imageUrl) {
         let likes = 'N/A';
         let comments = 'N/A';
         let captionText = '';
+        let date = 'N/A';
+        
+        const timeElement = document.querySelector('time');
+        if (timeElement && timeElement.getAttribute('datetime')) {
+            date = timeElement.getAttribute('datetime');
+        } else if (timeElement) {
+            date = timeElement.innerText;
+        }
         
         const h1Tags = document.querySelectorAll('h1');
         for (const h1 of h1Tags) {
@@ -161,12 +171,13 @@ function fetchOpenRouter(prompt, imageUrl) {
             }
         }
 
-        return { likes, comments, captionText };
+        return { likes, comments, captionText, date };
       });
 
       postData[i].likes = stats.likes;
       postData[i].comments = stats.comments;
       postData[i].caption = stats.captionText || 'No caption';
+      postData[i].date = stats.date;
       
       const promptText = `Explain in one short line what this Instagram post is about based on its text and image: "${postData[i].caption}"`;
       console.log('Fetching explanation from OpenRouter...');
@@ -176,6 +187,7 @@ function fetchOpenRouter(prompt, imageUrl) {
       console.log('Could not extract likes/comments for ' + postData[i].link + ':', e.message);
       postData[i].likes = 'N/A';
       postData[i].comments = 'N/A';
+      postData[i].date = 'N/A';
     }
 
     await postPage.close();
