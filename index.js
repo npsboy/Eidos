@@ -2,12 +2,21 @@ require('dotenv').config();
 const { chromium } = require('playwright');
 const https = require('https');
 
-function fetchOpenRouter(prompt) {
+function fetchOpenRouter(prompt, imageUrl) {
     return new Promise((resolve, reject) => {
         const apiKey = process.env.OPENROUTER_API_KEY || '';
+        
+        let contentPayload = prompt;
+        if (imageUrl) {
+            contentPayload = [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: imageUrl } }
+            ];
+        }
+
         const data = JSON.stringify({
-            model: 'google/gemma-4-26b-a4b-it:free',
-            messages: [{ role: 'user', content: prompt }]
+            model: 'google/gemma-4-26b-a4b-it',
+            messages: [{ role: 'user', content: contentPayload }]
         });
 
         const req = https.request('https://openrouter.ai/api/v1/chat/completions', {
@@ -161,9 +170,9 @@ function fetchOpenRouter(prompt) {
       postData[i].comments = stats.comments;
       postData[i].caption = stats.captionText || 'No caption';
       
-      const promptText = `Explain in one short line what this Instagram post is about based on its text: "${postData[i].caption}"`;
+      const promptText = `Explain in one short line what this Instagram post is about based on its text and image: "${postData[i].caption}"`;
       console.log('Fetching explanation from OpenRouter...');
-      const explanation = await fetchOpenRouter(promptText);
+      const explanation = await fetchOpenRouter(promptText, postData[i].img);
       postData[i].explanation = explanation.trim();
     } catch (e) {
       console.log('Could not extract likes/comments for ' + postData[i].link + ':', e.message);
