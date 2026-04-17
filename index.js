@@ -1,6 +1,38 @@
-require('dotenv').config();
-const { chromium } = require('playwright');
-const https = require('https');
+import fs from 'fs';
+import dotenv from 'dotenv';
+import { chromium } from 'playwright';
+import https from 'https';
+
+dotenv.config();
+
+
+
+const maxPosts = 1;
+const classifier_prompt = fs.readFileSync('classifier_prompt.md', 'utf8');
+
+
+const categories = {
+  "intent": [
+    "Promotional",
+    "Educational",
+    "Engagement",
+    "Branding",
+    "Social_Proof",
+    "Announcement",
+    "Entertainment"
+  ],
+  "format": [
+    "Trend",
+    "Meme",
+    "Tutorial",
+    "Behind_the_Scenes",
+    "User_Generated_Content",
+    "Influencer_Collaboration",
+    "Aesthetic",
+    "Storytelling"
+  ]
+};
+
 
 function fetchOpenRouter(prompt, imageUrl) {
     return new Promise((resolve, reject) => {
@@ -49,7 +81,6 @@ function fetchOpenRouter(prompt, imageUrl) {
     });
 }
 
-
 (async function () {
   const browser = await chromium.launch({
     headless: false
@@ -71,7 +102,6 @@ function fetchOpenRouter(prompt, imageUrl) {
   await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', { state: 'visible', timeout: 30000 });
   const posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all(); 
 
-  const maxPosts = 6;
   let postData = [];
 
   for (let i = 0; i < Math.min(posts.length, maxPosts); i++) {
@@ -179,15 +209,34 @@ function fetchOpenRouter(prompt, imageUrl) {
       postData[i].caption = stats.captionText || 'No caption';
       postData[i].date = stats.date;
       
-      const promptText = `Explain in one short line what this Instagram post is about based on its text and image: "${postData[i].caption}"`;
+        const promptText = classifier_prompt + `Here is the post caption: "${postData[i].caption}", and these are the categories: ${JSON.stringify(categories)}.`;
+
       console.log('Fetching explanation from OpenRouter...');
-      const explanation = await fetchOpenRouter(promptText, postData[i].img);
-      postData[i].explanation = explanation.trim();
+      let response = await fetchOpenRouter(promptText, postData[i].img);
+      
+      // Clean up markdown block if present
+      response = response.replace(/^```json/mi, '').replace(/```$/m, '').trim();
+      
+      let parsedResponse = {};
+      try {
+        parsedResponse = JSON.parse(response);
+      } catch (parseErr) {
+        console.error('Error parsing AI response:', parseErr.message);
+      }
+
+      const intent = parsedResponse.intent || 'Unknown';
+      const format = parsedResponse.format || 'Unknown';
+
+      postData[i].intent = intent;
+      postData[i].format = format;
+
     } catch (e) {
       console.log('Could not extract likes/comments for ' + postData[i].link + ':', e.message);
       postData[i].likes = 'N/A';
       postData[i].comments = 'N/A';
       postData[i].date = 'N/A';
+      postData[i].intent = 'Unknown';
+      postData[i].format = 'Unknown';
     }
 
     await postPage.close();
