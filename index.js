@@ -7,8 +7,8 @@ import ExcelJS from "exceljs";
 
 dotenv.config();
 
-const maxPosts = 2;
-const accounts = ["plaeto.schools"];
+const maxPosts = 3;
+const accounts = ["plaeto.schools", "nike"];
 
 const classifier_prompt = fs.readFileSync("classifier_prompt.md", "utf8");
 
@@ -30,7 +30,7 @@ const categories = {
     "User_Generated_Content",
     "Influencer_Collaboration",
     "Aesthetic",
-    "Storytelling",
+    "event"
   ],
 };
 
@@ -47,8 +47,10 @@ function fetchOpenRouter(prompt, imageUrl) {
     }
 
     const data = JSON.stringify({
-      model: "google/gemma-4-26b-a4b-it",
-      messages: [{ role: "user", content: contentPayload }],
+        model: "google/gemma-4-26b-a4b-it",
+        messages: [
+            { role: "user", content: contentPayload }
+        ],
     });
 
     const req = https.request(
@@ -568,36 +570,7 @@ function analyseData(rawData) {
     return global_insights;
 }
 
-(async function main() {
-  const browser = await chromium.launch({
-    headless: false,
-  });
-
-  const context = await browser.newContext({
-    storageState: "state.json",
-  });
-
-  const page = await context.newPage();
-
-  let rawData = {};
-
-  for (const account of accounts) {
-    let postData = await getAccountPosts(page, account, maxPosts);
-
-    for (let i = 0; i < postData.length; i++) {
-      postData[i] = await extractPostData(context, postData[i]);
-    }
-
-    console.log(postData);
-
-    rawData[account] = postData;
-  }
-
-  await browser.close();
-
-  const analysisOptions = analyseData(rawData);
-  console.log("Analysis Output:", JSON.stringify(analysisOptions, null, 2));
-
+async function generateExcelFile(analysisOptions) {
   // Convert to XLSX using exceljs for styling and spacing
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Insights");
@@ -692,4 +665,37 @@ function analyseData(rawData) {
 
   await workbook.xlsx.writeFile("global_insights.xlsx");
   console.log("Saved insights to global_insights.xlsx with wide columns, matched alignment, and shaded rows");
+}
+
+(async function main() {
+  const browser = await chromium.launch({
+    headless: false,
+  });
+
+  const context = await browser.newContext({
+    storageState: "state.json",
+  });
+
+  const page = await context.newPage();
+
+  let rawData = {};
+
+  for (const account of accounts) {
+    let postData = await getAccountPosts(page, account, maxPosts);
+
+    for (let i = 0; i < postData.length; i++) {
+      postData[i] = await extractPostData(context, postData[i]);
+    }
+
+    console.log(postData);
+
+    rawData[account] = postData;
+  }
+
+  await browser.close();
+
+  const analysisOptions = analyseData(rawData);
+  console.log("Analysis Output:", JSON.stringify(analysisOptions, null, 2));
+
+  await generateExcelFile(analysisOptions);
 })();
