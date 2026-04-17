@@ -2,11 +2,12 @@ import fs from "fs";
 import dotenv from "dotenv";
 import { chromium } from "playwright";
 import https from "https";
+import { get } from "http";
 
 dotenv.config();
 
 const maxPosts = 2;
-const accounts = ["nike", "plaeto.schools"];
+const accounts = ["plaeto.schools"];
 
 const classifier_prompt = fs.readFileSync("classifier_prompt.md", "utf8");
 
@@ -297,22 +298,159 @@ function calculateAverageTimeBetweenPosts(posts) {
     }
 }
 
+function getAvgLikesComments(posts) {
+    let totalLikes = 0;
+    let totalComments = 0;
+    let count = 0;
+
+    for (const post of posts) {
+        if (post.likes && post.likes !== "N/A" && !isNaN(parseLikes(post.likes))) {
+            totalLikes += parseLikes(post.likes);
+            count++;
+        }
+        if (post.comments && post.comments !== "N/A" && !isNaN(parseLikes(post.comments))) {
+            totalComments += parseLikes(post.comments);
+        }
+    }
+
+    const avgLikes = count > 0 ? totalLikes / count : "N/A";
+    const avgComments = count > 0 ? totalComments / count : "N/A";
+
+    return { avgLikes, avgComments };
+}
+
+function parseLikes(likesStr) {
+    if (typeof likesStr === "number") return likesStr;
+    if (likesStr.endsWith("k")) {
+        return parseFloat(likesStr) * 1000;
+    } else if (likesStr.endsWith("m")) {
+        return parseFloat(likesStr) * 1000000;
+    } else if (likesStr.endsWith("b")) {
+        return parseFloat(likesStr) * 1000000000;
+    } else {
+        return parseInt(likesStr.replace(/,/g, ""));
+    }
+}
+
+function getCategoryDistribution(posts) {
+    let intentCounts = {};
+    let formatCounts = {};
+    
+    /* 
+    format eg:
+        {
+            "Branding":{
+                "no_of_posts": 10, 
+                "category_total_likes": 10000,
+                "category_total_comments": 500,
+                "category_avg_likes": 1000,
+                "category_avg_comments": 50,
+                "relative_performance": {"likes": "20%", "comments": "-10%"}
+            }
+        }
+    */
+
+
+    let avgLikes = 0, avgComments = 0;
+    try {
+        const averages = getAvgLikesComments(posts);
+        avgLikes = averages.avgLikes;
+        avgComments = averages.avgComments;
+    } catch {
+        // Fallback if getAvgLikesComments is undefined
+    }
+
+    for (const post of posts) {
+        const intents = Array.isArray(post.intent) ? post.intent : [post.intent || "Unknown"];
+        for (const intent of intents) {
+            if (!intentCounts[intent]) intentCounts[intent] = {};
+            intentCounts[intent].no_of_posts = (intentCounts[intent].no_of_posts || 0) + 1;
+            intentCounts[intent].category_total_likes = (intentCounts[intent].category_total_likes || 0) + (isNaN(parseLikes(post.likes)) ? 0 : parseLikes(post.likes));
+            intentCounts[intent].category_total_comments = (intentCounts[intent].category_total_comments || 0) + (isNaN(parseLikes(post.comments)) ? 0 : parseLikes(post.comments));
+        }
+
+        const formats = Array.isArray(post.format) ? post.format : [post.format || "Unknown"];
+        for (const format of formats) {
+            if (!formatCounts[format]) formatCounts[format] = {};
+            formatCounts[format].no_of_posts = (formatCounts[format].no_of_posts || 0) + 1;
+            formatCounts[format].category_total_likes = (formatCounts[format].category_total_likes || 0) + (isNaN(parseLikes(post.likes)) ? 0 : parseLikes(post.likes));
+            formatCounts[format].category_total_comments = (formatCounts[format].category_total_comments || 0) + (isNaN(parseLikes(post.comments)) ? 0 : parseLikes(post.comments));
+        }
+    }
+
+    for (const intent in intentCounts) {
+        intentCounts[intent].category_avg_likes = avgLikes !== "N/A" ? (intentCounts[intent].category_total_likes / intentCounts[intent].no_of_posts) : "N/A";
+        intentCounts[intent].category_avg_comments = avgComments !== "N/A" ? (intentCounts[intent].category_total_comments / intentCounts[intent].no_of_posts) : "N/A";
+        
+        let relativePerformanceLikes = "N/A";
+        if (avgLikes !== "N/A" && intentCounts[intent].category_avg_likes !== "N/A") {
+            if (avgLikes === 0) {
+                relativePerformanceLikes = intentCounts[intent].category_avg_likes === 0 ? 0 : (intentCounts[intent].category_avg_likes > 0 ? Infinity : -Infinity);
+            } else {
+                relativePerformanceLikes = ((intentCounts[intent].category_avg_likes - avgLikes) / avgLikes) * 100;
+            }
+        }
+
+        let relativePerformanceComments = "N/A";
+        if (avgComments !== "N/A" && intentCounts[intent].category_avg_comments !== "N/A") {
+            if (avgComments === 0) {
+                relativePerformanceComments = intentCounts[intent].category_avg_comments === 0 ? 0 : (intentCounts[intent].category_avg_comments > 0 ? Infinity : -Infinity);
+            } else {
+                relativePerformanceComments = ((intentCounts[intent].category_avg_comments - avgComments) / avgComments) * 100;
+            }
+        }
+
+        intentCounts[intent].relative_performance = {
+            likes: relativePerformanceLikes !== "N/A" ? (relativePerformanceLikes === Infinity ? "Infinity%" : relativePerformanceLikes === -Infinity ? "-Infinity%" : relativePerformanceLikes.toFixed(2) + "%") : "N/A",
+            comments: relativePerformanceComments !== "N/A" ? (relativePerformanceComments === Infinity ? "Infinity%" : relativePerformanceComments === -Infinity ? "-Infinity%" : relativePerformanceComments.toFixed(2) + "%") : "N/A",
+        };
+    }
+
+    for (const format in formatCounts) {
+        formatCounts[format].category_avg_likes = avgLikes !== "N/A" ? (formatCounts[format].category_total_likes / formatCounts[format].no_of_posts) : "N/A";
+        formatCounts[format].category_avg_comments = avgComments !== "N/A" ? (formatCounts[format].category_total_comments / formatCounts[format].no_of_posts) : "N/A";
+        
+        let relativePerformanceLikes = "N/A";
+        if (avgLikes !== "N/A" && formatCounts[format].category_avg_likes !== "N/A") {
+            if (avgLikes === 0) {
+                relativePerformanceLikes = formatCounts[format].category_avg_likes === 0 ? 0 : (formatCounts[format].category_avg_likes > 0 ? Infinity : -Infinity);
+            } else {
+                relativePerformanceLikes = ((formatCounts[format].category_avg_likes - avgLikes) / avgLikes) * 100;
+            }
+        }
+
+        let relativePerformanceComments = "N/A";
+        if (avgComments !== "N/A" && formatCounts[format].category_avg_comments !== "N/A") {
+            if (avgComments === 0) {
+                relativePerformanceComments = formatCounts[format].category_avg_comments === 0 ? 0 : (formatCounts[format].category_avg_comments > 0 ? Infinity : -Infinity);
+            } else {
+                relativePerformanceComments = ((formatCounts[format].category_avg_comments - avgComments) / avgComments) * 100;
+            }
+        }
+
+        formatCounts[format].relative_performance = {
+            likes: relativePerformanceLikes !== "N/A" ? (relativePerformanceLikes === Infinity ? "Infinity%" : relativePerformanceLikes === -Infinity ? "-Infinity%" : relativePerformanceLikes.toFixed(2) + "%") : "N/A",
+            comments: relativePerformanceComments !== "N/A" ? (relativePerformanceComments === Infinity ? "Infinity%" : relativePerformanceComments === -Infinity ? "-Infinity%" : relativePerformanceComments.toFixed(2) + "%") : "N/A",
+        };
+    }
+
+    delete intentCounts["category_total_likes"];
+    delete intentCounts["category_total_comments"];
+    delete formatCounts["category_total_likes"];
+    delete formatCounts["category_total_comments"];
+
+    return {
+        intentDistribution: intentCounts,
+        formatDistribution: formatCounts,
+    };
+}
+
 function analyseData(rawData) {
     let analysis = {};
 
     for (const account in rawData) {
         const posts = rawData[account];
-        const intentCounts = {};
-        const formatCounts = {};
-
-        for (const post of posts) {
-            for (const intent of post.intent) {
-                intentCounts[intent] = (intentCounts[intent] || 0) + 1;
-            }
-            for (const format of post.format) {
-                formatCounts[format] = (formatCounts[format] || 0) + 1;
-            }
-        }
+        let { intentDistribution: intentCounts, formatDistribution: formatCounts } = getCategoryDistribution(posts);
 
         const avgTimeBetweenPostsReadable = calculateAverageTimeBetweenPosts(posts);
 
