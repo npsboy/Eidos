@@ -345,7 +345,7 @@ function getCategoryDistribution(posts) {
                 "category_total_comments": 500,
                 "category_avg_likes": 1000,
                 "category_avg_comments": 50,
-                "relative_performance": {"likes": "20%", "comments": "-10%"}
+                "relative_performance": {"likes": "20%", "comments": "-10%"},
             }
         }
     */
@@ -445,6 +445,106 @@ function getCategoryDistribution(posts) {
     };
 }
 
+function getAnalysisInsights(analysis) {
+    let globalIntentPerformance = {};
+    let globalFormatPerformance = {};
+
+    function parsePercent(val) {
+        if (!val || val === "N/A") return null;
+        if (val === "Infinity%") return Infinity;
+        if (val === "-Infinity%") return -Infinity;
+        return parseFloat(val.replace("%", ""));
+    }
+
+    function calculateMedian(arr) {
+        const filtered = arr.filter(n => n !== Infinity && n !== -Infinity);
+        if (filtered.length === 0) return null;
+        const sorted = [...filtered].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
+    const totalAccounts = Object.keys(analysis).length;
+
+    for (const account in analysis) {
+        const accountData = analysis[account];
+        const intentDist = accountData.intentDistribution || {};
+        const formatDist = accountData.formatDistribution || {};
+
+        for (const intent in intentDist) {
+            if (!globalIntentPerformance[intent]) globalIntentPerformance[intent] = { likes: [], comments: [], wins: { likes: 0, comments: 0 } };
+            const perf = intentDist[intent].relative_performance;
+            if (perf) {
+                const likes = parsePercent(perf.likes);
+                const comments = parsePercent(perf.comments);
+                if (likes !== null && !isNaN(likes)) {
+                    globalIntentPerformance[intent].likes.push(likes);
+                    if (likes > 0) globalIntentPerformance[intent].wins.likes++;
+                }
+                if (comments !== null && !isNaN(comments)) {
+                    globalIntentPerformance[intent].comments.push(comments);
+                    if (comments > 0) globalIntentPerformance[intent].wins.comments++;
+                }
+            }
+        }
+
+        for (const format in formatDist) {
+            if (!globalFormatPerformance[format]) globalFormatPerformance[format] = { likes: [], comments: [], wins: { likes: 0, comments: 0 } };
+            const perf = formatDist[format].relative_performance;
+            if (perf) {
+                const likes = parsePercent(perf.likes);
+                const comments = parsePercent(perf.comments);
+                if (likes !== null && !isNaN(likes)) {
+                    globalFormatPerformance[format].likes.push(likes);
+                    if (likes > 0) globalFormatPerformance[format].wins.likes++;
+                }
+                if (comments !== null && !isNaN(comments)) {
+                    globalFormatPerformance[format].comments.push(comments);
+                    if (comments > 0) globalFormatPerformance[format].wins.comments++;
+                }
+            }
+        }
+    }
+
+    function aggregate(performanceDict) {
+        let result = {};
+        for (const key in performanceDict) {
+            const likesArrFiltered = performanceDict[key].likes.filter(n => n !== Infinity && n !== -Infinity);
+            const commentsArrFiltered = performanceDict[key].comments.filter(n => n !== Infinity && n !== -Infinity);
+
+            const avgLikes = likesArrFiltered.length > 0 ? likesArrFiltered.reduce((a, b) => a + b, 0) / likesArrFiltered.length : null;
+            const avgComments = commentsArrFiltered.length > 0 ? commentsArrFiltered.reduce((a, b) => a + b, 0) / commentsArrFiltered.length : null;
+
+            const medianLikes = calculateMedian(performanceDict[key].likes);
+            const medianComments = calculateMedian(performanceDict[key].comments);
+            
+            const winRateLikes = totalAccounts > 0 ? (performanceDict[key].wins.likes / totalAccounts) * 100 : 0;
+            const winRateComments = totalAccounts > 0 ? (performanceDict[key].wins.comments / totalAccounts) * 100 : 0;
+
+            result[key] = {
+                global_relative_performance_average: {
+                    likes: avgLikes !== null ? avgLikes.toFixed(2) + "%" : "N/A",
+                    comments: avgComments !== null ? avgComments.toFixed(2) + "%" : "N/A"
+                },
+                global_relative_performance_median: {
+                    likes: medianLikes !== null ? medianLikes.toFixed(2) + "%" : "N/A",
+                    comments: medianComments !== null ? medianComments.toFixed(2) + "%" : "N/A"
+                },
+                account_relative_win_rate: {
+                    likes: winRateLikes.toFixed(2) + "%",
+                    comments: winRateComments.toFixed(2) + "%"
+                }
+            };
+        }
+        return result;
+    }
+
+    return {
+        intent_insights: aggregate(globalIntentPerformance),
+        format_insights: aggregate(globalFormatPerformance)
+    };
+}
+
 function analyseData(rawData) {
     let analysis = {};
 
@@ -461,7 +561,10 @@ function analyseData(rawData) {
             averageTimeBetweenPostsReadable: avgTimeBetweenPostsReadable,
         };
     }
-    return analysis;
+    
+    let global_insights = getAnalysisInsights(analysis);
+
+    return global_insights;
 }
 
 (async function main() {
