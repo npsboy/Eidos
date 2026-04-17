@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import { chromium } from "playwright";
 import https from "https";
 import { get } from "http";
+import ExcelJS from "exceljs";
 
 dotenv.config();
 
@@ -596,4 +597,99 @@ function analyseData(rawData) {
 
   const analysisOptions = analyseData(rawData);
   console.log("Analysis Output:", JSON.stringify(analysisOptions, null, 2));
+
+  // Convert to XLSX using exceljs for styling and spacing
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Insights");
+
+  // Define columns with custom widths
+  worksheet.columns = [
+    { header: "Category_Type", key: "type", width: 20 },
+    { header: "Category_Name", key: "name", width: 25 },
+    { header: "Avg_Relative_Likes", key: "avgLikes", width: 25 },
+    { header: "Avg_Relative_Comments", key: "avgComments", width: 25 },
+    { header: "Median_Relative_Likes", key: "medLikes", width: 25 },
+    { header: "Median_Relative_Comments", key: "medComments", width: 25 },
+    { header: "Win_Rate_Likes", key: "winLikes", width: 20 },
+    { header: "Win_Rate_Comments", key: "winComments", width: 20 },
+  ];
+
+  // Header styling
+  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).alignment = { horizontal: "center", vertical: "middle" };
+
+  let currentRow = 2; // Row 1 is header
+
+  if (analysisOptions.intent_insights) {
+      const intentEntries = Object.entries(analysisOptions.intent_insights);
+      if (intentEntries.length > 0) {
+          const startRow = currentRow;
+          for (const [intent, data] of intentEntries) {
+              const row = worksheet.addRow({
+                  type: "Intent",
+                  name: intent,
+                  avgLikes: data.global_relative_performance_average.likes,
+                  avgComments: data.global_relative_performance_average.comments,
+                  medLikes: data.global_relative_performance_median.likes,
+                  medComments: data.global_relative_performance_median.comments,
+                  winLikes: data.account_relative_win_rate.likes,
+                  winComments: data.account_relative_win_rate.comments
+              });
+
+              // Apply light blue shading for intent rows
+              row.eachCell((cell) => {
+                  cell.fill = {
+                      type: "pattern",
+                      pattern: "solid",
+                      fgColor: { argb: "FFD9E1F2" } // Light blue
+                  };
+              });
+
+              currentRow++;
+          }
+          if (currentRow - 1 >= startRow) {
+              worksheet.mergeCells(`A${startRow}:A${currentRow - 1}`);
+              const typeCell = worksheet.getCell(`A${startRow}`);
+              typeCell.alignment = { horizontal: "center", vertical: "middle" };
+          }
+      }
+  }
+
+  if (analysisOptions.format_insights) {
+      const formatEntries = Object.entries(analysisOptions.format_insights);
+      if (formatEntries.length > 0) {
+          const startRow = currentRow;
+          for (const [format, data] of formatEntries) {
+              const row = worksheet.addRow({
+                  type: "Format",
+                  name: format,
+                  avgLikes: data.global_relative_performance_average.likes,
+                  avgComments: data.global_relative_performance_average.comments,
+                  medLikes: data.global_relative_performance_median.likes,
+                  medComments: data.global_relative_performance_median.comments,
+                  winLikes: data.account_relative_win_rate.likes,
+                  winComments: data.account_relative_win_rate.comments
+              });
+
+              // Apply light orange shading for format rows
+              row.eachCell((cell) => {
+                  cell.fill = {
+                      type: "pattern",
+                      pattern: "solid",
+                      fgColor: { argb: "FFFCE4D6" } // Light orange
+                  };
+              });
+
+              currentRow++;
+          }
+          if (currentRow - 1 >= startRow) {
+              worksheet.mergeCells(`A${startRow}:A${currentRow - 1}`);
+              const typeCell = worksheet.getCell(`A${startRow}`);
+              typeCell.alignment = { horizontal: "center", vertical: "middle" };
+          }
+      }
+  }
+
+  await workbook.xlsx.writeFile("global_insights.xlsx");
+  console.log("Saved insights to global_insights.xlsx with wide columns, matched alignment, and shaded rows");
 })();
