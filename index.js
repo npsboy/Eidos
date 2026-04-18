@@ -7,8 +7,8 @@ import ExcelJS from "exceljs";
 
 dotenv.config();
 
-const maxPosts = 3;
-const accounts = ["plaeto.schools", "nike"];
+const maxPosts = 2;
+const accounts = ["plaeto.schools"];
 
 const classifier_prompt = fs.readFileSync("classifier_prompt.md", "utf8");
 
@@ -104,7 +104,25 @@ async function getAccountPosts(page, account, maxPosts) {
     state: "visible",
     timeout: 30000,
   });
-  const posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
+
+  let posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
+  
+  let previousHeight = await page.evaluate("document.body.scrollHeight");
+  while (posts.length < maxPosts) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    try {
+      await page.waitForTimeout(2000);
+      let newHeight = await page.evaluate(() => document.body.scrollHeight);
+      if (newHeight === previousHeight) {
+        break; // Reached end of page
+      }
+      previousHeight = newHeight;
+    } catch (e) {
+      console.log("Reached end of page or no more posts loading.");
+      break;
+    }
+    posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
+  }
 
   let postData = [];
 
@@ -548,6 +566,20 @@ function getAnalysisInsights(analysis) {
     };
 }
 
+function getAdditionalInsights(analysis) {
+    analysis.sort((a, b) => b.averageLikesComments.avgLikes - a.averageLikesComments.avgLikes);
+    let topPerformer = analysis[0];
+    let topPerformerFrequency = topPerformer.averageTimeBetweenPostsReadable;
+
+    
+    return {
+        topPerformer: {
+            account: topPerformer.account,
+            frequency: topPerformerFrequency
+        }
+    };
+}
+
 function analyseData(rawData) {
     let analysis = {};
 
@@ -558,6 +590,7 @@ function analyseData(rawData) {
         const avgTimeBetweenPostsReadable = calculateAverageTimeBetweenPosts(posts);
 
         analysis[account] = {
+            averageLikesComments: getAvgLikesComments(posts),
             totalPosts: posts.length,
             intentDistribution: intentCounts,
             formatDistribution: formatCounts,
