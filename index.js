@@ -11,6 +11,7 @@ const maxPosts = 2;
 const accounts = ["plaeto.schools"];
 
 const classifier_prompt = fs.readFileSync("classifier_prompt.md", "utf8");
+const interpreter_prompt = fs.readFileSync("interpreter_prompt.md", "utf8");
 
 const categories = {
   intent: [
@@ -44,6 +45,9 @@ function fetchOpenRouter(prompt, imageUrl) {
         { type: "text", text: prompt },
         { type: "image_url", image_url: { url: imageUrl } },
       ];
+    }
+    else {      
+        contentPayload = [{ type: "text", text: prompt }];
     }
 
     const data = JSON.stringify({
@@ -703,8 +707,8 @@ function analyseData(rawData) {
     let additional_insights = getAdditionalInsights(analysis, rawData);
 
     return {
-        ...global_insights,
-        ...additional_insights
+        global_insights: global_insights,
+        additional_insights: additional_insights
     };
 }
 
@@ -834,6 +838,10 @@ async function generateExcelFile(analysisOptions) {
 
   const analysisOptions = analyseData(rawData);
   console.log("Analysis Output:", JSON.stringify(analysisOptions, null, 2));
+
+  const aiOverviewPrompt = interpreter_prompt + "\n\nHere is the analysis output: " + JSON.stringify(analysisOptions) + "Here are the accounts we analyzed: " + accounts;
+  const aiOverview = await fetchOpenRouter(aiOverviewPrompt);
+  console.log("AI-Generated Overview:\n", aiOverview);
 
   await generateExcelFile(analysisOptions);
 })();
