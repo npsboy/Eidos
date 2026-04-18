@@ -567,6 +567,68 @@ function getAnalysisInsights(analysis) {
 }
 
 function getAdditionalInsights(analysis, rawData) {
+  function formatTwoHourInterval(startHour) {
+    const endHour = (startHour + 2) % 24;
+    const formatHour = (hour) => hour.toString().padStart(2, "0") + ":00";
+    return `${formatHour(startHour)} to ${formatHour(endHour)}`;
+  }
+
+  function getTimeOfDayEngagement(rawData) {
+    let bucketStats = {};
+
+    for (const account in rawData) {
+      for (const post of rawData[account]) {
+        if (!post.date || post.date === "N/A") continue;
+
+        const postDate = new Date(post.date);
+        if (isNaN(postDate.getTime())) continue;
+
+        const hour = postDate.getHours();
+        const bucketStart = Math.floor(hour / 2) * 2;
+        const bucketKey = formatTwoHourInterval(bucketStart);
+
+        if (!bucketStats[bucketKey]) {
+          bucketStats[bucketKey] = {
+            totalLikes: 0,
+            totalComments: 0,
+            likesCount: 0,
+            commentsCount: 0,
+          };
+        }
+
+        if (post.likes && post.likes !== "N/A") {
+          const likes = parseLikes(post.likes);
+          if (!isNaN(likes)) {
+            bucketStats[bucketKey].totalLikes += likes;
+            bucketStats[bucketKey].likesCount += 1;
+          }
+        }
+
+        if (post.comments && post.comments !== "N/A") {
+          const comments = parseLikes(post.comments);
+          if (!isNaN(comments)) {
+            bucketStats[bucketKey].totalComments += comments;
+            bucketStats[bucketKey].commentsCount += 1;
+          }
+        }
+      }
+    }
+
+    let output = {};
+    for (let startHour = 0; startHour < 24; startHour += 2) {
+      const bucketKey = formatTwoHourInterval(startHour);
+      const stats = bucketStats[bucketKey];
+      if (!stats) continue;
+
+      output[bucketKey] = {
+        avgLikes: stats.likesCount > 0 ? Number((stats.totalLikes / stats.likesCount).toFixed(2)) : "N/A",
+        avgComments: stats.commentsCount > 0 ? Number((stats.totalComments / stats.commentsCount).toFixed(2)) : "N/A",
+      };
+    }
+
+    return output;
+  }
+
     let analysisArray = Object.entries(analysis).map(([account, data]) => ({
         account,
         ...data
@@ -614,7 +676,8 @@ function getAdditionalInsights(analysis, rawData) {
             account: topPerformer ? topPerformer.account : "Unknown",
             frequency: topPerformerFrequency
         },
-        reelsPerformanceOverPosts: reelsPerformanceOverPosts
+      reelsPerformanceOverPosts: reelsPerformanceOverPosts,
+      timeOfDayEngagement: getTimeOfDayEngagement(rawData)
     };
 }
 
