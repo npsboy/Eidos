@@ -4,13 +4,20 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
     "playwright": "^1.59.1"
