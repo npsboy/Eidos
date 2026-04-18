@@ -566,17 +566,55 @@ function getAnalysisInsights(analysis) {
     };
 }
 
-function getAdditionalInsights(analysis) {
-    analysis.sort((a, b) => b.averageLikesComments.avgLikes - a.averageLikesComments.avgLikes);
-    let topPerformer = analysis[0];
-    let topPerformerFrequency = topPerformer.averageTimeBetweenPostsReadable;
+function getAdditionalInsights(analysis, rawData) {
+    let analysisArray = Object.entries(analysis).map(([account, data]) => ({
+        account,
+        ...data
+    }));
+    analysisArray.sort((a, b) => b.averageLikesComments.avgLikes - a.averageLikesComments.avgLikes);
+    let topPerformer = analysisArray[0];
+    let topPerformerFrequency = topPerformer ? topPerformer.averageTimeBetweenPostsReadable : "N/A";
 
+    let totalReelLikes = 0;
+    let reelCount = 0;
+    let totalPostLikes = 0;
+    let postCount = 0;
+
+    for (const account in rawData) {
+        for (const post of rawData[account]) {
+            if (post.likes && post.likes !== "N/A") {
+                let likes = parseLikes(post.likes);
+                if (!isNaN(likes)) {
+                    if (post.type === "reel") {
+                        totalReelLikes += likes;
+                        reelCount++;
+                    } else if (post.type === "post") {
+                        totalPostLikes += likes;
+                        postCount++;
+                    }
+                }
+            }
+        }
+    }
+
+    let avgReelLikes = reelCount > 0 ? totalReelLikes / reelCount : 0;
+    let avgPostLikes = postCount > 0 ? totalPostLikes / postCount : 0;
     
+    let reelsPerformanceOverPosts = "N/A";
+    if (avgPostLikes > 0) {
+        reelsPerformanceOverPosts = (((avgReelLikes - avgPostLikes) / avgPostLikes) * 100).toFixed(2) + "%";
+    } else if (avgReelLikes > 0 && avgPostLikes === 0) {
+        reelsPerformanceOverPosts = "Infinity%";
+    } else if (avgReelLikes === 0 && avgPostLikes === 0) {
+        reelsPerformanceOverPosts = "0.00%";
+    }
+
     return {
         topPerformer: {
-            account: topPerformer.account,
+            account: topPerformer ? topPerformer.account : "Unknown",
             frequency: topPerformerFrequency
-        }
+        },
+        reelsPerformanceOverPosts: reelsPerformanceOverPosts
     };
 }
 
@@ -599,8 +637,12 @@ function analyseData(rawData) {
     }
     
     let global_insights = getAnalysisInsights(analysis);
+    let additional_insights = getAdditionalInsights(analysis, rawData);
 
-    return global_insights;
+    return {
+        ...global_insights,
+        ...additional_insights
+    };
 }
 
 async function generateExcelFile(analysisOptions) {
