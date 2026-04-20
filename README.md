@@ -60,6 +60,18 @@ Request body:
 Notes:
 - `categories` is optional. If not provided, the default categories are used.
 
+Response body:
+
+```json
+{
+  "classification": {
+    "intent": "Promotional",
+    "format": "Trend"
+  },
+  "rawResponse": "{\n  \"intent\": \"Promotional\",\n  \"format\": \"Trend\"\n}"
+}
+```
+
 ### `POST /api/analyze`
 Runs end-to-end scrape + classify + analytics.
 
@@ -84,6 +96,124 @@ Notes:
 - `maxPosts` must be between 1 and 25.
 - `categories` is optional; falls back to default categories if not provided.
 - One analysis run is allowed at a time.
+
+Response body:
+
+```json
+{
+  "runId": "1713600000000",
+  "createdAt": "2026-04-20T12:00:00.000Z",
+  "accounts": [
+    "plaeto.schools",
+    "another.brand"
+  ],
+  "maxPosts": 3,
+  "rawData": {
+    "plaeto.schools": [
+      {
+        "link": "https://www.instagram.com/p/...",
+        "img": "https://...",
+        "type": "post",
+        "likes": 1500,
+        "comments": 45,
+        "caption": "Example caption...",
+        "date": "2026-04-18T10:00:00.000Z",
+        "intent": "Educational",
+        "format": "Tutorial"
+      }
+    ],
+    "another.brand": []
+  },
+  "analysis": {
+    "global_insights": {
+      "intent_insights": {
+        "Educational": {
+          "global_relative_performance_average": {
+            "likes": "10.50%",
+            "comments": "5.00%"
+          },
+          "global_relative_performance_median": {
+            "likes": "8.00%",
+            "comments": "2.50%"
+          },
+          "account_relative_win_rate": {
+            "likes": "50.00%",
+            "comments": "25.00%"
+          }
+        }
+      },
+      "format_insights": {
+        "Tutorial": {
+          "global_relative_performance_average": {
+            "likes": "15.00%",
+            "comments": "N/A"
+          },
+          "global_relative_performance_median": {
+            "likes": "12.00%",
+            "comments": "N/A"
+          },
+          "account_relative_win_rate": {
+            "likes": "100.00%",
+            "comments": "0.00%"
+          }
+        }
+      }
+    },
+    "additional_insights": {
+      "topPerformer": {
+        "account": "plaeto.schools",
+        "frequency": "2 days"
+      },
+      "reelsPerformanceOverPosts": "15.20%",
+      "timeOfDayEngagement": {
+        "10:00 to 12:00": {
+          "avgLikes": 1500,
+          "avgComments": 45
+        }
+      }
+    },
+    "account_analysis": {
+      "plaeto.schools": {
+        "averageLikesComments": {
+          "avgLikes": 1500,
+          "avgComments": 45
+        },
+        "totalPosts": 3,
+        "intentDistribution": {
+          "Educational": {
+            "no_of_posts": 1,
+            "category_total_likes": 1500,
+            "category_total_comments": 45,
+            "category_avg_likes": 1500,
+            "category_avg_comments": 45,
+            "relative_performance": {
+              "likes": "0.00%",
+              "comments": "0.00%"
+            }
+          }
+        },
+        "formatDistribution": {
+          "Tutorial": {
+            "no_of_posts": 1,
+            "category_total_likes": 1500,
+            "category_total_comments": 45,
+            "category_avg_likes": 1500,
+            "category_avg_comments": 45,
+            "relative_performance": {
+              "likes": "0.00%",
+              "comments": "0.00%"
+            }
+          }
+        },
+        "averageTimeBetweenPostsReadable": "2 days"
+      }
+    }
+  },
+  "aiOverview": null,
+  "excelPath": ".../outputs/global_insights_1713600000000.xlsx",
+  "errors": []
+}
+```
 
 ### `GET /api/runs/latest`
 Returns the latest completed analysis payload.
