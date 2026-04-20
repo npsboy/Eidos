@@ -3,3 +3,4 @@ global_insights.xlsx
 outputs/
 state.json
 node_modules/
+response.json
