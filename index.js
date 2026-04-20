@@ -21,6 +21,8 @@ const DEFAULT_ACCOUNTS = (process.env.DEFAULT_ACCOUNTS || "plaeto.schools")
   .map((value) => value.trim())
   .filter(Boolean);
 const STORAGE_STATE_PATH = path.resolve(__dirname, process.env.STORAGE_STATE_PATH || "state.json");
+const STORAGE_STATE_JSON = process.env.STORAGE_STATE_JSON || "";
+const STORAGE_STATE_BASE64 = process.env.STORAGE_STATE_BASE64 || "";
 const OUTPUT_DIR = path.resolve(__dirname, "outputs");
 
 const classifierPromptPath = path.resolve(__dirname, "classifier_prompt.md");
@@ -77,6 +79,31 @@ function cleanJsonResponse(text) {
 function parseModelJson(text) {
   const cleaned = cleanJsonResponse(text);
   return JSON.parse(cleaned);
+}
+
+function getStorageState() {
+  // Prefer env-provided state for deployment environments where files are ephemeral.
+  if (STORAGE_STATE_BASE64) {
+    try {
+      return JSON.parse(Buffer.from(STORAGE_STATE_BASE64, "base64").toString("utf8"));
+    } catch (error) {
+      console.warn(`Invalid STORAGE_STATE_BASE64: ${error.message}`);
+    }
+  }
+
+  if (STORAGE_STATE_JSON) {
+    try {
+      return JSON.parse(STORAGE_STATE_JSON);
+    } catch (error) {
+      console.warn(`Invalid STORAGE_STATE_JSON: ${error.message}`);
+    }
+  }
+
+  if (fs.existsSync(STORAGE_STATE_PATH)) {
+    return STORAGE_STATE_PATH;
+  }
+
+  return null;
 }
 
 function fetchOpenRouter(prompt, imageUrl) {
@@ -861,8 +888,9 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
 
   try {
     const contextOptions = {};
-    if (fs.existsSync(STORAGE_STATE_PATH)) {
-      contextOptions.storageState = STORAGE_STATE_PATH;
+    const storageState = getStorageState();
+    if (storageState) {
+      contextOptions.storageState = storageState;
     }
 
     const context = await browser.newContext(contextOptions);
