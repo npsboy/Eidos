@@ -949,7 +949,11 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
 }
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/", (_req, res) => {
