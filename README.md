@@ -49,9 +49,16 @@ Request body:
 ```json
 {
   "caption": "A sample Instagram caption",
-  "imageUrl": "https://example.com/image.jpg"
+  "imageUrl": "https://example.com/image.jpg",
+  "categories": {
+    "intent": ["Promotional", "Educational"],
+    "format": ["Trend", "Tutorial"]
+  }
 }
 ```
+
+Notes:
+- `categories` is optional. If not provided, the default categories are used.
 
 ### `POST /api/analyze`
 Runs end-to-end scrape + classify + analytics.
@@ -63,7 +70,11 @@ Request body:
   "accounts": ["plaeto.schools", "another.brand"],
   "maxPosts": 3,
   "includeAiOverview": true,
-  "generateExcel": true
+  "generateExcel": true,
+  "categories": {
+    "intent": ["Promotional", "Educational"],
+    "format": ["Trend", "Tutorial"]
+  }
 }
 ```
 
@@ -71,6 +82,7 @@ Notes:
 
 - `accounts` is optional; falls back to `DEFAULT_ACCOUNTS`.
 - `maxPosts` must be between 1 and 25.
+- `categories` is optional; falls back to default categories if not provided.
 - One analysis run is allowed at a time.
 
 ### `GET /api/runs/latest`

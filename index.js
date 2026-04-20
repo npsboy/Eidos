@@ -215,7 +215,7 @@ async function getAccountPosts(page, account, maxPosts) {
   return postData;
 }
 
-async function extractPostData(context, post, classifierPrompt) {
+async function extractPostData(context, post, classifierPrompt, customCategories = null) {
   const postPage = await context.newPage();
 
   try {
@@ -314,7 +314,8 @@ async function extractPostData(context, post, classifierPrompt) {
     post.caption = stats.captionText || "No caption";
     post.date = stats.date;
 
-    const promptText = `${classifierPrompt}\n\nHere is the post caption: "${post.caption}", and these are the categories: ${JSON.stringify(categories)}.`;
+    const appliedCategories = customCategories || categories;
+    const promptText = `${classifierPrompt}\n\nHere is the post caption: "${post.caption}", and these are the categories: ${JSON.stringify(appliedCategories)}.`;
     const classificationText = await fetchOpenRouter(promptText, post.img);
 
     let parsedResponse = {};
@@ -878,7 +879,7 @@ async function generateExcelFile(globalInsights, runId) {
   return filePath;
 }
 
-async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExcel }) {
+async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExcel, customCategories }) {
   const prompts = getPrompts();
   const runId = `${Date.now()}`;
   const rawData = {};
@@ -900,7 +901,7 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
       try {
         let postData = await getAccountPosts(page, account, maxPosts);
         for (let index = 0; index < postData.length; index += 1) {
-          postData[index] = await extractPostData(context, postData[index], prompts.classifierPrompt);
+          postData[index] = await extractPostData(context, postData[index], prompts.classifierPrompt, customCategories);
         }
         rawData[account] = postData;
       } catch (error) {
@@ -980,14 +981,15 @@ app.get("/api/categories", (_req, res) => {
 
 app.post("/api/classify", async (req, res, next) => {
   try {
-    const { caption, imageUrl } = req.body || {};
+    const { caption, imageUrl, categories: customCategories } = req.body || {};
     if (!caption || typeof caption !== "string") {
       res.status(400).json({ error: "caption is required and must be a string" });
       return;
     }
 
+    const appliedCategories = customCategories || categories;
     const prompts = getPrompts();
-    const promptText = `${prompts.classifierPrompt}\n\nHere is the post caption: "${caption}", and these are the categories: ${JSON.stringify(categories)}.`;
+    const promptText = `${prompts.classifierPrompt}\n\nHere is the post caption: "${caption}", and these are the categories: ${JSON.stringify(appliedCategories)}.`;
 
     const responseText = await fetchOpenRouter(promptText, imageUrl);
     let parsed = {};
@@ -1041,6 +1043,7 @@ app.post("/api/analyze", async (req, res, next) => {
       maxPosts,
       includeAiOverview,
       generateExcel,
+      customCategories: req.body?.categories,
     });
 
     latestRun = result;
