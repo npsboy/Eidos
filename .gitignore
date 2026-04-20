@@ -1,5 +1,5 @@
 .env
 global_insights.xlsx
 outputs/
-state.json
+state2.json
 node_modules/
