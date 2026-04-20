@@ -81,6 +81,79 @@ function parseModelJson(text) {
   return JSON.parse(cleaned);
 }
 
+function extractMultilineJsonEnvValue(envText, variableName) {
+  const marker = `${variableName}=`;
+  const markerIndex = envText.indexOf(marker);
+  if (markerIndex === -1) {
+    return "";
+  }
+
+  const rawValue = envText.slice(markerIndex + marker.length).trimStart();
+  if (!rawValue.startsWith("{")) {
+    return rawValue.split(/\r?\n/, 1)[0].trim();
+  }
+
+  let depth = 0;
+  let inString = false;
+  let quoteChar = "";
+  let escaped = false;
+  let extracted = "";
+
+  for (const char of rawValue) {
+    extracted += char;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (char === quoteChar) {
+        inString = false;
+        quoteChar = "";
+      }
+
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      quoteChar = char;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return extracted.trim();
+      }
+    }
+  }
+
+  return "";
+}
+
+function readStorageStateJsonFromDotenvFile() {
+  const dotenvPath = path.resolve(__dirname, ".env");
+  if (!fs.existsSync(dotenvPath)) {
+    return "";
+  }
+
+  try {
+    const dotenvContent = fs.readFileSync(dotenvPath, "utf8");
+    return extractMultilineJsonEnvValue(dotenvContent, "STORAGE_STATE_JSON");
+  } catch {
+    return "";
+  }
+}
+
 function getStorageState() {
   // Prefer env-provided state for deployment environments where files are ephemeral.
   if (STORAGE_STATE_BASE64) {
@@ -91,16 +164,32 @@ function getStorageState() {
     }
   }
 
+  let storageStateJsonError = null;
+
   if (STORAGE_STATE_JSON) {
     try {
       return JSON.parse(STORAGE_STATE_JSON);
     } catch (error) {
-      console.warn(`Invalid STORAGE_STATE_JSON: ${error.message}`);
+      storageStateJsonError = error;
+    }
+  }
+
+  // Dotenv can truncate unquoted multiline JSON values; recover full JSON from .env when needed.
+  const multilineStorageStateJson = readStorageStateJsonFromDotenvFile();
+  if (multilineStorageStateJson && multilineStorageStateJson !== STORAGE_STATE_JSON) {
+    try {
+      return JSON.parse(multilineStorageStateJson);
+    } catch (error) {
+      storageStateJsonError = error;
     }
   }
 
   if (fs.existsSync(STORAGE_STATE_PATH)) {
     return STORAGE_STATE_PATH;
+  }
+
+  if (storageStateJsonError) {
+    console.warn(`Invalid STORAGE_STATE_JSON: ${storageStateJsonError.message}`);
   }
 
   return null;
@@ -228,23 +317,231 @@ async function extractPostData(context, post, classifierPrompt, customCategories
       let captionText = "";
       let date = "N/A";
 
+      function extractCountToken(text, labelPattern) {
+        if (!text) {
+          return null;
+        }
+        const matcher = String(text).match(new RegExp(`([\\d.,]+(?:\\s*[kmbKMB])?)\\s+${labelPattern}`, "i"));
+        if (!matcher) {
+          return null;
+        }
+        return matcher[1].replace(/\s+/g, "").trim();
+      }
+
+      function normalizeDate(dateValue) {
+        if (!dateValue) {
+          return null;
+        }
+        const parsedDate = new Date(dateValue);
+        if (Number.isNaN(parsedDate.getTime())) {
+          return String(dateValue).trim();
+        }
+        return parsedDate.toISOString();
+      }
+
+      function extractFromJsonLd() {
+        const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+        const nodes = [];
+
+        for (const script of scripts) {
+          const raw = script.textContent?.trim();
+          if (!raw) {
+            continue;
+          }
+
+          try {
+            const parsed = JSON.parse(raw);
+            nodes.push(parsed);
+          } catch {
+            // Ignore malformed JSON-LD blocks.
+          }
+        }
+
+        const stack = [...nodes];
+        const extracted = {
+          likes: null,
+          comments: null,
+          caption: null,
+          date: null,
+        };
+
+        while (stack.length > 0) {
+          const current = stack.pop();
+          if (!current) {
+            continue;
+          }
+
+          if (Array.isArray(current)) {
+            for (const item of current) {
+              stack.push(item);
+            }
+            continue;
+          }
+
+          if (typeof current !== "object") {
+            continue;
+          }
+
+          const candidateDate = current.uploadDate
+            || current.dateCreated
+            || current.datePublished
+            || current.startDate;
+          if (!extracted.date && candidateDate) {
+            extracted.date = normalizeDate(candidateDate);
+          }
+
+          const candidateCaption = current.caption || current.headline || current.name || current.description;
+          if (!extracted.caption && typeof candidateCaption === "string" && candidateCaption.trim()) {
+            extracted.caption = candidateCaption.trim();
+          }
+
+          const commentCount = current.commentCount ?? current.comments;
+          if (!extracted.comments && (typeof commentCount === "number" || typeof commentCount === "string")) {
+            const token = String(commentCount).trim();
+            if (token) {
+              extracted.comments = token;
+            }
+          }
+
+          const interactions = current.interactionStatistic
+            ? (Array.isArray(current.interactionStatistic)
+              ? current.interactionStatistic
+              : [current.interactionStatistic])
+            : [];
+
+          for (const interaction of interactions) {
+            if (!interaction || typeof interaction !== "object") {
+              continue;
+            }
+
+            const typeRaw = interaction.interactionType;
+            const typeName = String(
+              typeof typeRaw === "string"
+                ? typeRaw
+                : (typeRaw?.["@type"] || ""),
+            ).toLowerCase();
+
+            const interactionCount = interaction.userInteractionCount ?? interaction.interactionCount;
+            const countToken = interactionCount !== undefined && interactionCount !== null
+              ? String(interactionCount).trim()
+              : "";
+
+            if (!countToken) {
+              continue;
+            }
+
+            if (!extracted.likes && (typeName.includes("like") || typeName.includes("favorite"))) {
+              extracted.likes = countToken;
+            }
+
+            if (!extracted.comments && typeName.includes("comment")) {
+              extracted.comments = countToken;
+            }
+          }
+
+          for (const value of Object.values(current)) {
+            if (value && typeof value === "object") {
+              stack.push(value);
+            }
+          }
+        }
+
+        return extracted;
+      }
+
+      const jsonLdValues = extractFromJsonLd();
+      if (jsonLdValues.likes) {
+        likes = jsonLdValues.likes;
+      }
+      if (jsonLdValues.comments) {
+        comments = jsonLdValues.comments;
+      }
+      if (jsonLdValues.caption) {
+        captionText = jsonLdValues.caption;
+      }
+      if (jsonLdValues.date) {
+        date = jsonLdValues.date;
+      }
+
+      const ogDescription = document.querySelector('meta[property="og:description"]')?.getAttribute("content") || "";
+      if (likes === "N/A") {
+        const likeFromOg = extractCountToken(ogDescription, "likes?");
+        if (likeFromOg) {
+          likes = likeFromOg;
+        }
+      }
+      if (comments === "N/A") {
+        const commentsFromOg = extractCountToken(ogDescription, "comments?");
+        if (commentsFromOg) {
+          comments = commentsFromOg;
+        }
+      }
+
+      if (comments === "N/A" && likes !== "N/A" && ogDescription) {
+        const mentionsComments = /comments?/i.test(ogDescription);
+        if (!mentionsComments) {
+          comments = "0";
+        }
+      }
+
       const timeElement = document.querySelector("time");
-      if (timeElement && timeElement.getAttribute("datetime")) {
+      if (date === "N/A" && timeElement && timeElement.getAttribute("datetime")) {
         date = timeElement.getAttribute("datetime");
-      } else if (timeElement) {
+      } else if (date === "N/A" && timeElement) {
         date = timeElement.innerText;
       }
 
-      const h1Tags = document.querySelectorAll("h1");
-      for (const h1 of h1Tags) {
-        if (
-          h1.innerText
-          && h1.innerText.trim().length > 0
-          && h1.innerText !== "Instagram"
-          && !h1.innerText.includes("Log in")
-        ) {
-          captionText = h1.innerText.trim();
-          break;
+      if (date === "N/A") {
+        const publishedMeta = document.querySelector('meta[property="article:published_time"]')?.getAttribute("content")
+          || document.querySelector('meta[property="og:updated_time"]')?.getAttribute("content")
+          || "";
+        const normalizedDate = normalizeDate(publishedMeta);
+        if (normalizedDate) {
+          date = normalizedDate;
+        }
+      }
+
+      const pageHtml = document.documentElement?.innerHTML || "";
+
+      if (likes === "N/A") {
+        const likeJsonMatch = pageHtml.match(/"like_count":(\d+)/)
+          || pageHtml.match(/"edge_media_preview_like":\{"count":(\d+)/);
+        if (likeJsonMatch?.[1]) {
+          likes = likeJsonMatch[1];
+        }
+      }
+
+      if (comments === "N/A") {
+        const commentJsonMatch = pageHtml.match(/"comment_count":(\d+)/)
+          || pageHtml.match(/"edge_media_to_parent_comment":\{"count":(\d+)/)
+          || pageHtml.match(/"edge_media_preview_comment":\{"count":(\d+)/);
+        if (commentJsonMatch?.[1]) {
+          comments = commentJsonMatch[1];
+        }
+      }
+
+      if (date === "N/A") {
+        const timestampMatch = pageHtml.match(/"taken_at_timestamp":(\d+)/);
+        if (timestampMatch?.[1]) {
+          const timestampMillis = Number.parseInt(timestampMatch[1], 10) * 1000;
+          if (!Number.isNaN(timestampMillis)) {
+            date = new Date(timestampMillis).toISOString();
+          }
+        }
+      }
+
+      if (!captionText) {
+        const h1Tags = document.querySelectorAll("h1");
+        for (const h1 of h1Tags) {
+          if (
+            h1.innerText
+            && h1.innerText.trim().length > 0
+            && h1.innerText !== "Instagram"
+            && !h1.innerText.includes("Log in")
+          ) {
+            captionText = h1.innerText.trim();
+            break;
+          }
         }
       }
 
@@ -295,13 +592,21 @@ async function extractPostData(context, post, classifierPrompt, customCategories
           }
 
           if (foundNumbers.length === 2) {
-            likes = foundNumbers[0];
-            comments = foundNumbers[1];
+            if (likes === "N/A") {
+              likes = foundNumbers[0];
+            }
+            if (comments === "N/A") {
+              comments = foundNumbers[1];
+            }
             break;
           }
 
-          if (foundNumbers.length === 1 && likes === "N/A") {
-            likes = foundNumbers[0];
+          if (foundNumbers.length === 1) {
+            if (likes === "N/A") {
+              likes = foundNumbers[0];
+            } else if (comments === "N/A") {
+              comments = foundNumbers[0];
+            }
           }
         }
       }
