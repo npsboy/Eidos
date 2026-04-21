@@ -1,3 +1,5 @@
+RUN echo "THIS IS THE NEW DOCKERFILE"
+
 # Use a standard Node.js image
 FROM node:20-bookworm-slim
 
