@@ -17,9 +17,6 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 console.log("PORT FROM ENV:", process.env.PORT);
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Eidos backend service listening on port ${PORT}`);
-});
 
 
 const DEFAULT_MAX_POSTS = Number.parseInt(process.env.DEFAULT_MAX_POSTS || "2", 10);
@@ -1401,3 +1398,7 @@ app.use((error, _req, res, _next) => {
   });
 });
 
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Eidos backend service listening on port ${PORT}`);
+});
