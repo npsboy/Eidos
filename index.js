@@ -271,12 +271,32 @@ function fetchOpenRouter(prompt, imageUrl) {
 
 async function getAccountPosts(page, account, maxPosts) {
   await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
-  await page.screenshot({ path: "/tmp/insta.png", fullPage: true });
   console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
   console.log("TITLE:", await page.title());
   console.log("URL:", page.url());
-  const buffer = await page.screenshot({ fullPage: true });
-  console.log("SCREENSHOT_BASE64:", buffer.toString("base64"));
+  try {
+    await page.screenshot({
+      path: "/tmp/insta.png",
+      fullPage: true,
+      timeout: 120000,
+      animations: "disabled",
+    });
+
+    const buffer = await page.screenshot({
+      fullPage: true,
+      timeout: 120000,
+      animations: "disabled",
+    });
+    console.log("SCREENSHOT_BASE64:", buffer.toString("base64"));
+  } catch (error) {
+    console.warn("Full-page screenshot failed, falling back to viewport screenshot:", error.message);
+    const fallbackBuffer = await page.screenshot({
+      fullPage: false,
+      timeout: 20000,
+      animations: "disabled",
+    });
+    console.log("SCREENSHOT_BASE64:", fallbackBuffer.toString("base64"));
+  }
   await page.waitForSelector("header", { timeout: 30000 });
 
   await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
