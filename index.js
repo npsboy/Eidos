@@ -272,6 +272,7 @@ function fetchOpenRouter(prompt, imageUrl) {
 async function getAccountPosts(page, account, maxPosts) {
   await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
   await page.screenshot({ path: "/tmp/insta.png", fullPage: true });
+  console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
   console.log("TITLE:", await page.title());
   console.log("URL:", page.url());
   const buffer = await page.screenshot({ fullPage: true });
