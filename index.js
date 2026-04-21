@@ -1221,6 +1221,9 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
     }
 
     const context = await browser.newContext(contextOptions);
+    const cookies = await context.cookies();
+    console.log("cookies loaded into browser context:", cookies.length);
+
     const page = await context.newPage();
 
     for (const account of accounts) {
