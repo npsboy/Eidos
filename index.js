@@ -271,6 +271,11 @@ function fetchOpenRouter(prompt, imageUrl) {
 
 async function getAccountPosts(page, account, maxPosts) {
   await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
+  await page.screenshot({ path: "/tmp/insta.png", fullPage: true });
+  console.log("TITLE:", await page.title());
+  console.log("URL:", page.url());
+  const buffer = await page.screenshot({ fullPage: true });
+  console.log("SCREENSHOT_BASE64:", buffer.toString("base64"));
   await page.waitForSelector("header", { timeout: 30000 });
 
   await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
