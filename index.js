@@ -15,6 +15,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT;
+console.log("PORT FROM ENV:", process.env.PORT);
+
+
 const DEFAULT_MAX_POSTS = Number.parseInt(process.env.DEFAULT_MAX_POSTS || "2", 10);
 const DEFAULT_ACCOUNTS = (process.env.DEFAULT_ACCOUNTS || "plaeto.schools")
   .split(",")
