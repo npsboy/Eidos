@@ -1,7 +1,8 @@
-RUN echo "THIS IS THE NEW DOCKERFILE"
-
 # Use a standard Node.js image
 FROM node:20-bookworm-slim
+
+RUN echo "THIS IS THE NEW DOCKERFILE"
+
 
 # Set the working directory
 WORKDIR /app
