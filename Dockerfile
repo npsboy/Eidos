@@ -19,9 +19,6 @@ RUN npx playwright install --with-deps chromium
 # Copy the rest of the application code
 COPY . .
 
-# Set environment variables
-ENV PORT=3000
-
 # Expose the API port
 EXPOSE 3000
 
