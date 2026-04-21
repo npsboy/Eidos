@@ -17,7 +17,17 @@ const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 console.log("PORT FROM ENV:", process.env.PORT);
 
+process.on("exit", (code) => {
+  console.log("🚨 PROCESS EXIT EVENT:", code);
+});
 
+process.on("uncaughtException", (err) => {
+  console.error("🚨 UNCAUGHT EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("🚨 UNHANDLED REJECTION:", err);
+});
 
 const DEFAULT_MAX_POSTS = Number.parseInt(process.env.DEFAULT_MAX_POSTS || "2", 10);
 const DEFAULT_ACCOUNTS = (process.env.DEFAULT_ACCOUNTS || "plaeto.schools")
