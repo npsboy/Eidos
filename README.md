@@ -4,7 +4,7 @@ Express backend for Instagram scraping, post classification, and insight generat
 
 ## Deploy Target
 
-This repo is ready for Northflank deployments using Heroku-style buildpacks (no Docker required).
+This repo is configured for Docker-based deployment.
 
 ## Runtime Requirements
 
@@ -28,7 +28,20 @@ npm install
 npm start
 ```
 
-The process binds to `PORT`, which Northflank sets automatically.
+The process binds to `PORT`, which your platform should set automatically.
+
+## Docker Deploy
+
+Use the included `Dockerfile` as the runtime source.
+
+```bash
+docker build -t eidos-backend .
+docker run -p 3000:3000 --env-file .env eidos-backend
+```
+
+Important:
+- Runtime command must be `npm start` (or `node index.js`).
+- Do not use `node test_analyze.js` as the service start command; it is only a one-off client test script.
 
 ## API Routes
 
@@ -223,9 +236,9 @@ Downloads the latest generated Excel file (if `generateExcel` was true).
 
 ## Northflank Setup Notes
 
-- Build command: `npm install`
-- Start command: `npm start`
-- Heroku buildpack mode will also detect the included `Procfile` (`web: npm start`).
+- Build method: Dockerfile
+- Runtime command (inside container): `npm start`
+- Container port: `3000`
 
 ## Security Notes
 

@@ -7,6 +7,7 @@
 
 async function testAnalyzeEndpoint() {
   const url = 'http://localhost:3000/api/analyze';
+  let hasError = false;
   
   // Customizing the payload based on the README.md specification
   const payload = {
@@ -45,6 +46,11 @@ async function testAnalyzeEndpoint() {
   } catch (error) {
     console.error('\n❌ Error testing endpoint:');
     console.error(error.message);
+    hasError = true;
+  }
+
+  if (hasError) {
+    process.exitCode = 1;
   }
 }
 
