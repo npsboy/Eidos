@@ -1204,7 +1204,14 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
   const rawData = {};
   const errors = [];
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu"
+    ]
+  });
 
   try {
     const contextOptions = {};
