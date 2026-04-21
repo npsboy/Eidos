@@ -12,7 +12,7 @@ async function testAnalyzeEndpoint() {
   const payload = {
     accounts: ['plaeto.schools'], // You can add more accounts here
     maxPosts: 2,
-    includeAiOverview: true,
+    includeAiOverview: false,
     generateExcel: false, 
     categories: {
       intent: ["Promotional", "Educational", "Entertainment"],
