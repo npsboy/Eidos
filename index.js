@@ -1394,6 +1394,6 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Eidos backend service listening on port ${PORT}`);
 });
