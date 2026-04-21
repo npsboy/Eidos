@@ -20,7 +20,7 @@ RUN npx playwright install --with-deps chromium
 COPY . .
 
 # Expose the API port
-EXPOSE 3000
+EXPOSE 8080
 
 # Start the application
 CMD ["node", "index.js"]

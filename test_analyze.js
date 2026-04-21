@@ -1,12 +1,12 @@
 /**
  * Script to test the /api/analyze endpoint locally.
- * Ensure the backend server is running on http://localhost:3000 before executing this script.
+ * Ensure the backend server is running on http://localhost:8080 before executing this script.
  * 
  * Usage: node test_analyze.js
  */
 
 async function testAnalyzeEndpoint() {
-  const url = 'http://localhost:3000/api/analyze';
+  const url = 'http://localhost:8080/api/analyze';
   let hasError = false;
   
   // Customizing the payload based on the README.md specification
