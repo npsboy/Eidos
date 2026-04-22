@@ -274,28 +274,29 @@ async function getAccountPosts(page, account, maxPosts) {
   console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
   console.log("TITLE:", await page.title());
   console.log("URL:", page.url());
-  try {
-    await page.screenshot({
-      path: "/tmp/insta.png",
-      fullPage: true,
-      timeout: 120000,
-      animations: "disabled",
-    });
+  const screenshotTimeoutMs = Number.parseInt(process.env.DEBUG_SCREENSHOT_TIMEOUT_MS || "5000", 10);
+  const base64MaxChars = Number.parseInt(process.env.DEBUG_SCREENSHOT_BASE64_MAX_CHARS || "4000", 10);
+  let screenshotBuffer = null;
 
-    const buffer = await page.screenshot({
-      fullPage: true,
-      timeout: 120000,
-      animations: "disabled",
-    });
-    console.log("SCREENSHOT_BASE64:", buffer.toString("base64"));
-  } catch (error) {
-    console.warn("Full-page screenshot failed, falling back to viewport screenshot:", error.message);
-    const fallbackBuffer = await page.screenshot({
+  try {
+    screenshotBuffer = await page.screenshot({
+      path: "/tmp/insta.png",
       fullPage: false,
-      timeout: 20000,
+      timeout: screenshotTimeoutMs,
       animations: "disabled",
     });
-    console.log("SCREENSHOT_BASE64:", fallbackBuffer.toString("base64"));
+  } catch (error) {
+    console.warn("Primary screenshot failed:", error.message);
+  }
+
+  if (screenshotBuffer) {
+    const screenshotBase64 = screenshotBuffer.toString("base64");
+    const clippedBase64 = screenshotBase64.slice(0, Math.max(0, base64MaxChars));
+    console.log("SCREENSHOT_BASE64_LEN:", screenshotBase64.length);
+    console.log("SCREENSHOT_BASE64:", clippedBase64);
+    if (clippedBase64.length < screenshotBase64.length) {
+      console.log("SCREENSHOT_BASE64_TRUNCATED:", true);
+    }
   }
   await page.waitForSelector("header", { timeout: 30000 });
 
