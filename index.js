@@ -274,7 +274,7 @@ async function getAccountPosts(page, account, maxPosts) {
   console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
   console.log("TITLE:", await page.title());
   console.log("URL:", page.url());
-  const screenshotTimeoutMs = Number.parseInt(process.env.DEBUG_SCREENSHOT_TIMEOUT_MS || "5000", 10);
+  const screenshotTimeoutMs = Number.parseInt(process.env.DEBUG_SCREENSHOT_TIMEOUT_MS || "10000", 10);
   const base64MaxChars = Number.parseInt(process.env.DEBUG_SCREENSHOT_BASE64_MAX_CHARS || "4000", 10);
   let screenshotBuffer = null;
 
@@ -287,6 +287,20 @@ async function getAccountPosts(page, account, maxPosts) {
     });
   } catch (error) {
     console.warn("Primary screenshot failed:", error.message);
+    try {
+      const cdpSession = await page.context().newCDPSession(page);
+      const cdpResult = await cdpSession.send("Page.captureScreenshot", {
+        format: "jpeg",
+        quality: 60,
+        fromSurface: true,
+      });
+
+      screenshotBuffer = Buffer.from(cdpResult.data, "base64");
+      await fsp.writeFile("/tmp/insta.jpg", screenshotBuffer);
+      console.log("DEBUG_SCREENSHOT_FALLBACK:", "cdp");
+    } catch (fallbackError) {
+      console.warn("CDP screenshot fallback failed:", fallbackError.message);
+    }
   }
 
   if (screenshotBuffer) {
