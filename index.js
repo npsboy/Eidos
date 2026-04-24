@@ -274,6 +274,13 @@ async function getAccountPosts(page, account, maxPosts) {
   console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
   console.log("TITLE:", await page.title());
   console.log("URL:", page.url());
+
+  // Give Instagram's React app a moment to render past the white screen, or catch login walls
+  try {
+    await page.waitForSelector("body", { timeout: 3000 });
+    await page.waitForTimeout(2000);
+  } catch (e) {}
+
   const base64MaxChars = Number.parseInt(process.env.DEBUG_SCREENSHOT_BASE64_MAX_CHARS || "4000", 10);
   let screenshotBuffer = null;
 
