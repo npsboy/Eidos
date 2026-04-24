@@ -282,21 +282,21 @@ async function getAccountPosts(page, account, maxPosts) {
   } catch (e) {}
 
   const base64MaxChars = Number.parseInt(process.env.DEBUG_SCREENSHOT_BASE64_MAX_CHARS || "4000", 10);
+  const screenshotTimeoutMs = Number.parseInt(process.env.DEBUG_SCREENSHOT_TIMEOUT_MS || "3000", 10);
   let screenshotBuffer = null;
 
   try {
-    const cdpSession = await page.context().newCDPSession(page);
-    const cdpResult = await cdpSession.send("Page.captureScreenshot", {
-      format: "jpeg",
-      quality: 40
+    // Keep screenshot best-effort only so debug capture never disrupts scraping.
+    screenshotBuffer = await page.screenshot({
+      type: "jpeg",
+      quality: 50,
+      fullPage: false,
+      timeout: screenshotTimeoutMs,
     });
-    screenshotBuffer = Buffer.from(cdpResult.data, "base64");
-    
-    // Writing synchronously/quickly to tmp
     await fsp.writeFile("/tmp/insta.jpg", screenshotBuffer).catch(() => {});
-    console.log("DEBUG_SCREENSHOT: fast CDP capture complete");
+    console.log("DEBUG_SCREENSHOT: viewport capture complete");
   } catch (error) {
-    console.warn("Fast CDP screenshot failed:", error.message);
+    console.warn("Debug screenshot skipped:", error.message);
   }
 
   if (screenshotBuffer) {
@@ -308,6 +308,12 @@ async function getAccountPosts(page, account, maxPosts) {
       console.log("SCREENSHOT_BASE64_TRUNCATED:", true);
     }
   }
+  if (page.isClosed()) {
+    console.warn("Instagram page closed before parsing; reopening page once.");
+    page = await page.context().newPage();
+    await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
+  }
+
   await page.waitForSelector("header", { timeout: 30000 });
 
   await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
