@@ -279,9 +279,14 @@ function safeEvaluate(page, fn, fallback, timeoutMs = 10000) {
 }
 
 async function getAccountPosts(page, account, maxPosts) {
-  await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  // Race networkidle (waits for JS redirects to settle) against a 20s hard cap.
+  // domcontentloaded fires on the shell page before Instagram's JS redirect completes,
+  // leaving the DOM empty. networkidle waits until the real profile page is loaded.
+  await Promise.race([
+    page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "networkidle", timeout: 25000 }),
+    new Promise((resolve) => setTimeout(resolve, 20000)),
+  ]).catch(() => {});
   console.log(`Navigated to https://www.instagram.com/${account}/`);
-  await page.waitForTimeout(5000);
 
   const bodyText = await safeEvaluate(page, () => document.body?.innerText || "", "");
   const isLoginPage = /log in|sign up|create an account/i.test(bodyText);
