@@ -274,64 +274,45 @@ async function getAccountPosts(page, account, maxPosts) {
   console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
   console.log("TITLE:", await page.title());
   console.log("URL:", page.url());
+  await page.waitForTimeout(3000);
 
-  // Give Instagram's React app a moment to render past the white screen, or catch login walls
+  const debugTextMaxChars = Number.parseInt(process.env.DEBUG_PAGE_TEXT_MAX_CHARS || "3000", 10);
+  const debugHtmlMaxChars = Number.parseInt(process.env.DEBUG_PAGE_HTML_MAX_CHARS || "3000", 10);
   try {
-    await page.waitForSelector("body", { timeout: 1000 });
-    await page.waitForTimeout(500);
-  } catch (e) {}
+    const pageDebug = await page.evaluate(() => ({
+      text: (document.body?.innerText || "").replace(/\s+/g, " ").trim(),
+      html: document.documentElement?.outerHTML || "",
+    }));
 
-  const base64MaxChars = Number.parseInt(process.env.DEBUG_SCREENSHOT_BASE64_MAX_CHARS || "4000", 10);
-  const screenshotTimeoutMs = Number.parseInt(process.env.DEBUG_SCREENSHOT_TIMEOUT_MS || "3000", 10);
-  let screenshotBuffer = null;
+    const clippedText = pageDebug.text.slice(0, Math.max(0, debugTextMaxChars));
+    const clippedHtml = pageDebug.html.slice(0, Math.max(0, debugHtmlMaxChars));
 
-  try {
-    // Keep screenshot best-effort only so debug capture never disrupts scraping.
-    screenshotBuffer = await page.screenshot({
-      type: "jpeg",
-      quality: 50,
-      fullPage: false,
-      timeout: screenshotTimeoutMs,
-    });
-    await fsp.writeFile("/tmp/insta.jpg", screenshotBuffer).catch(() => {});
-    console.log("DEBUG_SCREENSHOT: viewport capture complete");
-  } catch (error) {
-    console.warn("Debug screenshot skipped:", error.message);
-  }
-
-  if (screenshotBuffer) {
-    const screenshotBase64 = screenshotBuffer.toString("base64");
-    const clippedBase64 = screenshotBase64.slice(0, Math.max(0, base64MaxChars));
-    console.log("SCREENSHOT_BASE64_LEN:", screenshotBase64.length);
-    console.log("SCREENSHOT_BASE64:", clippedBase64);
-    if (clippedBase64.length < screenshotBase64.length) {
-      console.log("SCREENSHOT_BASE64_TRUNCATED:", true);
+    console.log("PAGE_TEXT_LEN:", pageDebug.text.length);
+    console.log("PAGE_TEXT:", clippedText);
+    if (clippedText.length < pageDebug.text.length) {
+      console.log("PAGE_TEXT_TRUNCATED:", true);
     }
+
+    console.log("PAGE_HTML_LEN:", pageDebug.html.length);
+    console.log("PAGE_HTML:", clippedHtml);
+    if (clippedHtml.length < pageDebug.html.length) {
+      console.log("PAGE_HTML_TRUNCATED:", true);
+    }
+  } catch (error) {
+    console.warn("Debug page log skipped:", error.message);
   }
   if (page.isClosed()) {
     console.warn("Instagram page closed before parsing; reopening page once.");
     page = await page.context().newPage();
     await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
-  }
-
-  // Instagram sometimes serves alternate shells where header is delayed or absent.
-  await page.waitForSelector("main, article, section, header", {
-    state: "attached",
-    timeout: 5000,
-  }).catch(() => {});
-
-  try {
-    await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
-      state: "visible",
-      timeout: 8000,
-    });
-  } catch (error) {
-    const currentTitle = await page.title().catch(() => "N/A");
-    const currentUrl = page.url();
-    throw new Error(`No post links found for ${account}. title=${currentTitle}, url=${currentUrl}, cause=${error.message}`);
+    await page.waitForTimeout(3000);
   }
 
   let posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
+  if (posts.length === 0) {
+    console.warn(`No post/reel links found after fixed wait for ${account}.`);
+    return [];
+  }
   let previousHeight = await page.evaluate("document.body.scrollHeight");
 
   while (posts.length < maxPosts) {
