@@ -269,44 +269,48 @@ function fetchOpenRouter(prompt, imageUrl) {
   });
 }
 
+// page.evaluate() hangs indefinitely when Instagram destroys the JS context
+// mid-redirect. This helper races every evaluate against a hard timer.
+function safeEvaluate(page, fn, fallback, timeoutMs = 10000) {
+  return Promise.race([
+    page.evaluate(fn).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
+}
+
 async function getAccountPosts(page, account, maxPosts) {
   await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded", timeout: 30000 });
   console.log(`Navigated to https://www.instagram.com/${account}/`);
-  // Wait for post links OR a login field — whichever appears first. Caps at 10s.
-  await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"], input[name="username"]', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(5000);
 
-  try {
-    const bodyText = await page.evaluate(() => document.body?.innerText || "");
-    const isLoginPage = /log in|sign up|create an account/i.test(bodyText);
-    console.log("PAGE_TEXT_LEN:", bodyText.length);
-    console.log("IS_LOGIN_PAGE:", isLoginPage);
-    console.log("PAGE_TEXT_SNIPPET:", bodyText.slice(0, 500));
-  } catch (error) {
-    console.warn("Debug page log skipped:", error.message);
-  }
+  const bodyText = await safeEvaluate(page, () => document.body?.innerText || "", "");
+  const isLoginPage = /log in|sign up|create an account/i.test(bodyText);
+  console.log("PAGE_TEXT_LEN:", bodyText.length);
+  console.log("IS_LOGIN_PAGE:", isLoginPage);
+  console.log("PAGE_TEXT_SNIPPET:", bodyText.slice(0, 500));
 
-  let postCount = await page.evaluate(() => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length);
+  let postCount = await safeEvaluate(page, () => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length, 0);
   if (postCount === 0) {
     console.warn(`No post/reel links found after fixed wait for ${account}.`);
     return [];
   }
-  let previousHeight = await page.evaluate(() => document.body.scrollHeight);
+  let previousHeight = await safeEvaluate(page, () => document.body.scrollHeight, 0);
 
   while (postCount < maxPosts) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await safeEvaluate(page, () => window.scrollTo(0, document.body.scrollHeight), undefined);
     await page.waitForTimeout(1000);
 
-    const newHeight = await page.evaluate(() => document.body.scrollHeight);
+    const newHeight = await safeEvaluate(page, () => document.body.scrollHeight, 0);
     if (newHeight === previousHeight) {
       break;
     }
     previousHeight = newHeight;
-    postCount = await page.evaluate(() => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length);
+    postCount = await safeEvaluate(page, () => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length, 0);
   }
 
   // Extract all post data in one evaluate call so no Playwright locator handles
   // can go stale between reads when React re-renders the feed.
-  const postData = await page.evaluate((max) => {
+  const postData = await safeEvaluate(page, (max) => {
     const anchors = Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]'));
     return anchors.slice(0, max).reduce((acc, a) => {
       const href = a.getAttribute("href");
@@ -318,7 +322,7 @@ async function getAccountPosts(page, account, maxPosts) {
       });
       return acc;
     }, []);
-  }, maxPosts);
+  }, [], 15000);
 
   return postData;
 }
