@@ -270,28 +270,18 @@ function fetchOpenRouter(prompt, imageUrl) {
 }
 
 async function getAccountPosts(page, account, maxPosts) {
-  await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
-  console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
+  await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "load" });
+  console.log(`Navigated to https://www.instagram.com/${account}/`);
   await page.waitForTimeout(3000);
 
-  const debugBodyMaxChars = Number.parseInt(process.env.DEBUG_PAGE_BODY_MAX_CHARS || "3000", 10);
   try {
-    const bodyHtml = await page.evaluate(() => document.body?.outerHTML || "");
-    const clippedBodyHtml = bodyHtml.slice(0, Math.max(0, debugBodyMaxChars));
-
-    console.log("PAGE_BODY_LEN:", bodyHtml.length);
-    console.log("PAGE_BODY:", clippedBodyHtml);
-    if (clippedBodyHtml.length < bodyHtml.length) {
-      console.log("PAGE_BODY_TRUNCATED:", true);
-    }
+    const bodyText = await page.evaluate(() => document.body?.innerText || "");
+    const isLoginPage = /log in|sign up|create an account/i.test(bodyText);
+    console.log("PAGE_TEXT_LEN:", bodyText.length);
+    console.log("IS_LOGIN_PAGE:", isLoginPage);
+    console.log("PAGE_TEXT_SNIPPET:", bodyText.slice(0, 500));
   } catch (error) {
     console.warn("Debug page log skipped:", error.message);
-  }
-  if (page.isClosed()) {
-    console.warn("Instagram page closed before parsing; reopening page once.");
-    page = await page.context().newPage();
-    await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
   }
 
   let posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
@@ -1229,12 +1219,15 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu"
-    ]
+      "--disable-gpu",
+      "--disable-blink-features=AutomationControlled",
+    ],
   });
 
   try {
-    const contextOptions = {};
+    const contextOptions = {
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    };
     const storageState = getStorageState();
     if (storageState) {
       contextOptions.storageState = storageState;
