@@ -285,17 +285,15 @@ async function getAccountPosts(page, account, maxPosts) {
     console.warn("Debug page log skipped:", error.message);
   }
 
-  let posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
-  if (posts.length === 0) {
+  let postCount = await page.evaluate(() => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length);
+  if (postCount === 0) {
     console.warn(`No post/reel links found after fixed wait for ${account}.`);
     return [];
   }
-  let previousHeight = await page.evaluate("document.body.scrollHeight");
+  let previousHeight = await page.evaluate(() => document.body.scrollHeight);
 
-  while (posts.length < maxPosts) {
-    await page.evaluate(() => {
-      window.scrollTo(0, document.body.scrollHeight);
-    });
+  while (postCount < maxPosts) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(1000);
 
     const newHeight = await page.evaluate(() => document.body.scrollHeight);
@@ -303,28 +301,24 @@ async function getAccountPosts(page, account, maxPosts) {
       break;
     }
     previousHeight = newHeight;
-    posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
+    postCount = await page.evaluate(() => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length);
   }
 
-  const postData = [];
-  for (let index = 0; index < Math.min(posts.length, maxPosts); index += 1) {
-    const post = posts[index];
-    const link = await post.getAttribute("href");
-
-    let img = null;
-    const imgLocator = post.locator("img");
-    if ((await imgLocator.count()) > 0) {
-      img = await imgLocator.getAttribute("src");
-    }
-
-    if (link) {
-      postData.push({
-        link: `https://www.instagram.com${link}`,
-        img,
-        type: link.includes("/reel/") ? "reel" : "post",
+  // Extract all post data in one evaluate call so no Playwright locator handles
+  // can go stale between reads when React re-renders the feed.
+  const postData = await page.evaluate((max) => {
+    const anchors = Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]'));
+    return anchors.slice(0, max).reduce((acc, a) => {
+      const href = a.getAttribute("href");
+      if (!href) return acc;
+      acc.push({
+        link: `https://www.instagram.com${href}`,
+        img: a.querySelector("img")?.getAttribute("src") || null,
+        type: href.includes("/reel/") ? "reel" : "post",
       });
-    }
-  }
+      return acc;
+    }, []);
+  }, maxPosts);
 
   return postData;
 }
