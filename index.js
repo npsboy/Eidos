@@ -277,8 +277,8 @@ async function getAccountPosts(page, account, maxPosts) {
 
   // Give Instagram's React app a moment to render past the white screen, or catch login walls
   try {
-    await page.waitForSelector("body", { timeout: 3000 });
-    await page.waitForTimeout(2000);
+    await page.waitForSelector("body", { timeout: 1000 });
+    await page.waitForTimeout(500);
   } catch (e) {}
 
   const base64MaxChars = Number.parseInt(process.env.DEBUG_SCREENSHOT_BASE64_MAX_CHARS || "4000", 10);
@@ -314,12 +314,22 @@ async function getAccountPosts(page, account, maxPosts) {
     await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
   }
 
-  await page.waitForSelector("header", { timeout: 30000 });
+  // Instagram sometimes serves alternate shells where header is delayed or absent.
+  await page.waitForSelector("main, article, section, header", {
+    state: "attached",
+    timeout: 5000,
+  }).catch(() => {});
 
-  await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
-    state: "visible",
-    timeout: 30000,
-  });
+  try {
+    await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
+      state: "visible",
+      timeout: 8000,
+    });
+  } catch (error) {
+    const currentTitle = await page.title().catch(() => "N/A");
+    const currentUrl = page.url();
+    throw new Error(`No post links found for ${account}. title=${currentTitle}, url=${currentUrl}, cause=${error.message}`);
+  }
 
   let posts = await page.locator('a[href*="/p/"], a[href*="/reel/"]').all();
   let previousHeight = await page.evaluate("document.body.scrollHeight");
@@ -328,7 +338,7 @@ async function getAccountPosts(page, account, maxPosts) {
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1000);
 
     const newHeight = await page.evaluate(() => document.body.scrollHeight);
     if (newHeight === previousHeight) {
@@ -366,7 +376,7 @@ async function extractPostData(context, post, classifierPrompt, customCategories
 
   try {
     await postPage.goto(post.link, { waitUntil: "domcontentloaded" });
-    await postPage.waitForSelector("main", { timeout: 15000 });
+    await postPage.waitForSelector("main", { timeout: 5000 });
 
     const stats = await postPage.evaluate(() => {
       let likes = "N/A";
