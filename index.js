@@ -272,31 +272,17 @@ function fetchOpenRouter(prompt, imageUrl) {
 async function getAccountPosts(page, account, maxPosts) {
   await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded" });
   console.log(`Attempted to navigate to https://www.instagram.com/${account}/`);
-  console.log("TITLE:", await page.title());
-  console.log("URL:", page.url());
   await page.waitForTimeout(3000);
 
-  const debugTextMaxChars = Number.parseInt(process.env.DEBUG_PAGE_TEXT_MAX_CHARS || "3000", 10);
-  const debugHtmlMaxChars = Number.parseInt(process.env.DEBUG_PAGE_HTML_MAX_CHARS || "3000", 10);
+  const debugBodyMaxChars = Number.parseInt(process.env.DEBUG_PAGE_BODY_MAX_CHARS || "3000", 10);
   try {
-    const pageDebug = await page.evaluate(() => ({
-      text: (document.body?.innerText || "").replace(/\s+/g, " ").trim(),
-      html: document.documentElement?.outerHTML || "",
-    }));
+    const bodyHtml = await page.evaluate(() => document.body?.outerHTML || "");
+    const clippedBodyHtml = bodyHtml.slice(0, Math.max(0, debugBodyMaxChars));
 
-    const clippedText = pageDebug.text.slice(0, Math.max(0, debugTextMaxChars));
-    const clippedHtml = pageDebug.html.slice(0, Math.max(0, debugHtmlMaxChars));
-
-    console.log("PAGE_TEXT_LEN:", pageDebug.text.length);
-    console.log("PAGE_TEXT:", clippedText);
-    if (clippedText.length < pageDebug.text.length) {
-      console.log("PAGE_TEXT_TRUNCATED:", true);
-    }
-
-    console.log("PAGE_HTML_LEN:", pageDebug.html.length);
-    console.log("PAGE_HTML:", clippedHtml);
-    if (clippedHtml.length < pageDebug.html.length) {
-      console.log("PAGE_HTML_TRUNCATED:", true);
+    console.log("PAGE_BODY_LEN:", bodyHtml.length);
+    console.log("PAGE_BODY:", clippedBodyHtml);
+    if (clippedBodyHtml.length < bodyHtml.length) {
+      console.log("PAGE_BODY_TRUNCATED:", true);
     }
   } catch (error) {
     console.warn("Debug page log skipped:", error.message);
