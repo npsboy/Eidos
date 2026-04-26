@@ -270,9 +270,10 @@ function fetchOpenRouter(prompt, imageUrl) {
 }
 
 async function getAccountPosts(page, account, maxPosts) {
-  await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "load" });
+  await page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "domcontentloaded", timeout: 30000 });
   console.log(`Navigated to https://www.instagram.com/${account}/`);
-  await page.waitForTimeout(3000);
+  // Wait for post links OR a login field — whichever appears first. Caps at 10s.
+  await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"], input[name="username"]', { timeout: 10000 }).catch(() => {});
 
   try {
     const bodyText = await page.evaluate(() => document.body?.innerText || "");
