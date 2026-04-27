@@ -1,6 +1,6 @@
 # Eidos Backend Service
 
-Express backend for Instagram scraping, post classification, and insight generation.
+Express backend for Instagram scraping via Apify, post classification, and insight generation.
 
 ## Deploy Target
 
@@ -10,6 +10,7 @@ This repo is configured for Docker-based deployment.
 
 - Node.js 18+
 - Environment variable `OPENROUTER_API_KEY`
+- Environment variable `APIFY_TOKEN`
 
 Optional environment variables:
 
@@ -17,9 +18,7 @@ Optional environment variables:
 - `OPENROUTER_MODEL` (default: `google/gemma-4-26b-a4b-it`)
 - `DEFAULT_ACCOUNTS` (comma-separated handles, default: `plaeto.schools`)
 - `DEFAULT_MAX_POSTS` (default: `2`)
-- `STORAGE_STATE_BASE64` (base64-encoded Playwright storage state JSON; highest priority)
-- `STORAGE_STATE_JSON` (raw Playwright storage state JSON string; second priority)
-- `STORAGE_STATE_PATH` (default: `state.json`; used only if env state is not provided)
+- `APIFY_INSTAGRAM_ACTOR` (default: `apify/instagram-post-scraper`)
 
 ## Start
 
@@ -242,15 +241,5 @@ Downloads the latest generated Excel file (if `generateExcel` was true).
 
 ## Security Notes
 
-- Keep `.env` and `state.json` private.
-- `state.json` includes authenticated browser session state; do not commit it.
-
-### Storing State In Env
-
-To move browser auth state from `state.json` into an environment variable, prefer base64:
-
-```bash
-node -e "process.stdout.write(Buffer.from(require('fs').readFileSync('state.json','utf8')).toString('base64'))"
-```
-
-Set that output as `STORAGE_STATE_BASE64` in your deployment environment.
+- Keep `.env` private.
+- Do not commit API keys such as `OPENROUTER_API_KEY` or `APIFY_TOKEN`.

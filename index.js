@@ -5,7 +5,6 @@ import https from "https";
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
-import { chromium } from "playwright";
 import ExcelJS from "exceljs";
 import { fileURLToPath } from "url";
 
@@ -34,9 +33,8 @@ const DEFAULT_ACCOUNTS = (process.env.DEFAULT_ACCOUNTS || "plaeto.schools")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
-const STORAGE_STATE_PATH = path.resolve(__dirname, process.env.STORAGE_STATE_PATH || "state.json");
-const STORAGE_STATE_JSON = process.env.STORAGE_STATE_JSON || "";
-const STORAGE_STATE_BASE64 = process.env.STORAGE_STATE_BASE64 || "";
+const APIFY_TOKEN = process.env.APIFY_TOKEN || "";
+const APIFY_INSTAGRAM_ACTOR = process.env.APIFY_INSTAGRAM_ACTOR || "apify/instagram-post-scraper";
 const OUTPUT_DIR = path.resolve(__dirname, "outputs");
 
 const classifierPromptPath = path.resolve(__dirname, "classifier_prompt.md");
@@ -95,118 +93,61 @@ function parseModelJson(text) {
   return JSON.parse(cleaned);
 }
 
-function extractMultilineJsonEnvValue(envText, variableName) {
-  const marker = `${variableName}=`;
-  const markerIndex = envText.indexOf(marker);
-  if (markerIndex === -1) {
-    return "";
-  }
+function fetchJson(url, { method = "GET", body, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null;
 
-  const rawValue = envText.slice(markerIndex + marker.length).trimStart();
-  if (!rawValue.startsWith("{")) {
-    return rawValue.split(/\r?\n/, 1)[0].trim();
-  }
+    const req = https.request(
+      url,
+      {
+        method,
+        headers: {
+          Accept: "application/json",
+          ...(payload
+            ? {
+              "Content-Type": "application/json",
+              "Content-Length": Buffer.byteLength(payload),
+            }
+            : {}),
+          ...headers,
+        },
+      },
+      (res) => {
+        let responseBody = "";
+        res.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        res.on("end", () => {
+          const statusCode = res.statusCode || 500;
 
-  let depth = 0;
-  let inString = false;
-  let quoteChar = "";
-  let escaped = false;
-  let extracted = "";
+          if (statusCode >= 400) {
+            reject(new Error(`Request failed (${statusCode}): ${responseBody || "No response body"}`));
+            return;
+          }
 
-  for (const char of rawValue) {
-    extracted += char;
+          if (!responseBody) {
+            resolve(null);
+            return;
+          }
 
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
+          try {
+            resolve(JSON.parse(responseBody));
+          } catch (error) {
+            reject(new Error(`Unable to parse JSON response: ${error.message}`));
+          }
+        });
+      },
+    );
 
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
+    req.on("error", (error) => {
+      reject(new Error(`Request failed: ${error.message}`));
+    });
 
-      if (char === quoteChar) {
-        inString = false;
-        quoteChar = "";
-      }
-
-      continue;
+    if (payload) {
+      req.write(payload);
     }
-
-    if (char === '"' || char === "'") {
-      inString = true;
-      quoteChar = char;
-      continue;
-    }
-
-    if (char === "{") {
-      depth += 1;
-    } else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return extracted.trim();
-      }
-    }
-  }
-
-  return "";
-}
-
-function readStorageStateJsonFromDotenvFile() {
-  const dotenvPath = path.resolve(__dirname, ".env");
-  if (!fs.existsSync(dotenvPath)) {
-    return "";
-  }
-
-  try {
-    const dotenvContent = fs.readFileSync(dotenvPath, "utf8");
-    return extractMultilineJsonEnvValue(dotenvContent, "STORAGE_STATE_JSON");
-  } catch {
-    return "";
-  }
-}
-
-function getStorageState() {
-  // Prefer env-provided state for deployment environments where files are ephemeral.
-  if (STORAGE_STATE_BASE64) {
-    try {
-      return JSON.parse(Buffer.from(STORAGE_STATE_BASE64, "base64").toString("utf8"));
-    } catch (error) {
-      console.warn(`Invalid STORAGE_STATE_BASE64: ${error.message}`);
-    }
-  }
-
-  let storageStateJsonError = null;
-
-  if (STORAGE_STATE_JSON) {
-    try {
-      return JSON.parse(STORAGE_STATE_JSON);
-    } catch (error) {
-      storageStateJsonError = error;
-    }
-  }
-
-  // Dotenv can truncate unquoted multiline JSON values; recover full JSON from .env when needed.
-  const multilineStorageStateJson = readStorageStateJsonFromDotenvFile();
-  if (multilineStorageStateJson && multilineStorageStateJson !== STORAGE_STATE_JSON) {
-    try {
-      return JSON.parse(multilineStorageStateJson);
-    } catch (error) {
-      storageStateJsonError = error;
-    }
-  }
-
-  if (fs.existsSync(STORAGE_STATE_PATH)) {
-    return STORAGE_STATE_PATH;
-  }
-
-  if (storageStateJsonError) {
-    console.warn(`Invalid STORAGE_STATE_JSON: ${storageStateJsonError.message}`);
-  }
-
-  return null;
+    req.end();
+  });
 }
 
 function fetchOpenRouter(prompt, imageUrl) {
@@ -269,387 +210,56 @@ function fetchOpenRouter(prompt, imageUrl) {
   });
 }
 
-// page.evaluate() hangs indefinitely when Instagram destroys the JS context
-// mid-redirect. This helper races every evaluate against a hard timer.
-function safeEvaluate(page, fn, fallback, timeoutMs = 10000) {
-  return Promise.race([
-    page.evaluate(fn).catch(() => fallback),
-    new Promise((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
-  ]);
-}
-
-async function getAccountPosts(page, account, maxPosts) {
-  // Race networkidle (waits for JS redirects to settle) against a 20s hard cap.
-  // domcontentloaded fires on the shell page before Instagram's JS redirect completes,
-  // leaving the DOM empty. networkidle waits until the real profile page is loaded.
-  await Promise.race([
-    page.goto(`https://www.instagram.com/${account}/`, { waitUntil: "networkidle", timeout: 25000 }),
-    new Promise((resolve) => setTimeout(resolve, 20000)),
-  ]).catch(() => {});
-  console.log(`Navigated to https://www.instagram.com/${account}/`);
-
-  const bodyText = await safeEvaluate(page, () => document.body?.innerText || "", "");
-  const isLoginPage = /log in|sign up|create an account/i.test(bodyText);
-  console.log("PAGE_TEXT_LEN:", bodyText.length);
-  console.log("IS_LOGIN_PAGE:", isLoginPage);
-  console.log("PAGE_TEXT_SNIPPET:", bodyText.slice(0, 500));
-
-  let postCount = await safeEvaluate(page, () => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length, 0);
-  if (postCount === 0) {
-    console.warn(`No post/reel links found after fixed wait for ${account}.`);
-    return [];
-  }
-  let previousHeight = await safeEvaluate(page, () => document.body.scrollHeight, 0);
-
-  while (postCount < maxPosts) {
-    await safeEvaluate(page, () => window.scrollTo(0, document.body.scrollHeight), undefined);
-    await page.waitForTimeout(1000);
-
-    const newHeight = await safeEvaluate(page, () => document.body.scrollHeight, 0);
-    if (newHeight === previousHeight) {
-      break;
-    }
-    previousHeight = newHeight;
-    postCount = await safeEvaluate(page, () => document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').length, 0);
+async function getAccountPosts(account, maxPosts) {
+  if (!APIFY_TOKEN) {
+    throw new Error("APIFY_TOKEN is missing");
   }
 
-  // Extract all post data in one evaluate call so no Playwright locator handles
-  // can go stale between reads when React re-renders the feed.
-  const postData = await safeEvaluate(page, (max) => {
-    const anchors = Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]'));
-    return anchors.slice(0, max).reduce((acc, a) => {
-      const href = a.getAttribute("href");
-      if (!href) return acc;
-      acc.push({
-        link: `https://www.instagram.com${href}`,
-        img: a.querySelector("img")?.getAttribute("src") || null,
-        type: href.includes("/reel/") ? "reel" : "post",
-      });
-      return acc;
-    }, []);
-  }, [], 15000);
+  const input = {
+    dataDetailLevel: "basicData",
+    resultsLimit: maxPosts,
+    skipPinnedPosts: false,
+    username: [account],
+  };
 
-  return postData;
+  const url = `https://api.apify.com/v2/acts/${encodeURIComponent(APIFY_INSTAGRAM_ACTOR)}/run-sync-get-dataset-items?token=${encodeURIComponent(APIFY_TOKEN)}&clean=true&format=json`;
+  const response = await fetchJson(url, { method: "POST", body: input });
+  const posts = Array.isArray(response)
+    ? response
+    : (Array.isArray(response?.items) ? response.items : []);
+
+  return posts.slice(0, maxPosts).map((item) => {
+    const sourceUrl = item?.url || item?.inputUrl || (item?.shortCode ? `https://www.instagram.com/p/${item.shortCode}/` : "");
+    const normalizedType = String(item?.type || "").toLowerCase();
+    const productType = String(item?.productType || "").toLowerCase();
+
+    return {
+      link: sourceUrl,
+      img: item?.displayUrl || (Array.isArray(item?.images) ? item.images[0] : null) || null,
+      type: normalizedType === "video" || productType === "clips" || sourceUrl.includes("/reel/")
+        ? "reel"
+        : "post",
+      likes: item?.likesCount ?? "N/A",
+      comments: item?.commentsCount ?? "N/A",
+      caption: item?.caption || "No caption",
+      date: item?.timestamp || "N/A",
+    };
+  });
 }
 
-async function extractPostData(context, post, classifierPrompt, customCategories = null) {
-  const postPage = await context.newPage();
+async function extractPostData(post, classifierPrompt, customCategories = null) {
+  const enrichedPost = {
+    ...post,
+    likes: post.likes ?? "N/A",
+    comments: post.comments ?? "N/A",
+    caption: post.caption || "No caption",
+    date: post.date || "N/A",
+  };
 
   try {
-    await postPage.goto(post.link, { waitUntil: "domcontentloaded" });
-    await postPage.waitForSelector("main", { timeout: 5000 });
-
-    const stats = await postPage.evaluate(() => {
-      let likes = "N/A";
-      let comments = "N/A";
-      let captionText = "";
-      let date = "N/A";
-
-      function extractCountToken(text, labelPattern) {
-        if (!text) {
-          return null;
-        }
-        const matcher = String(text).match(new RegExp(`([\\d.,]+(?:\\s*[kmbKMB])?)\\s+${labelPattern}`, "i"));
-        if (!matcher) {
-          return null;
-        }
-        return matcher[1].replace(/\s+/g, "").trim();
-      }
-
-      function normalizeDate(dateValue) {
-        if (!dateValue) {
-          return null;
-        }
-        const parsedDate = new Date(dateValue);
-        if (Number.isNaN(parsedDate.getTime())) {
-          return String(dateValue).trim();
-        }
-        return parsedDate.toISOString();
-      }
-
-      function extractFromJsonLd() {
-        const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
-        const nodes = [];
-
-        for (const script of scripts) {
-          const raw = script.textContent?.trim();
-          if (!raw) {
-            continue;
-          }
-
-          try {
-            const parsed = JSON.parse(raw);
-            nodes.push(parsed);
-          } catch {
-            // Ignore malformed JSON-LD blocks.
-          }
-        }
-
-        const stack = [...nodes];
-        const extracted = {
-          likes: null,
-          comments: null,
-          caption: null,
-          date: null,
-        };
-
-        while (stack.length > 0) {
-          const current = stack.pop();
-          if (!current) {
-            continue;
-          }
-
-          if (Array.isArray(current)) {
-            for (const item of current) {
-              stack.push(item);
-            }
-            continue;
-          }
-
-          if (typeof current !== "object") {
-            continue;
-          }
-
-          const candidateDate = current.uploadDate
-            || current.dateCreated
-            || current.datePublished
-            || current.startDate;
-          if (!extracted.date && candidateDate) {
-            extracted.date = normalizeDate(candidateDate);
-          }
-
-          const candidateCaption = current.caption || current.headline || current.name || current.description;
-          if (!extracted.caption && typeof candidateCaption === "string" && candidateCaption.trim()) {
-            extracted.caption = candidateCaption.trim();
-          }
-
-          const commentCount = current.commentCount ?? current.comments;
-          if (!extracted.comments && (typeof commentCount === "number" || typeof commentCount === "string")) {
-            const token = String(commentCount).trim();
-            if (token) {
-              extracted.comments = token;
-            }
-          }
-
-          const interactions = current.interactionStatistic
-            ? (Array.isArray(current.interactionStatistic)
-              ? current.interactionStatistic
-              : [current.interactionStatistic])
-            : [];
-
-          for (const interaction of interactions) {
-            if (!interaction || typeof interaction !== "object") {
-              continue;
-            }
-
-            const typeRaw = interaction.interactionType;
-            const typeName = String(
-              typeof typeRaw === "string"
-                ? typeRaw
-                : (typeRaw?.["@type"] || ""),
-            ).toLowerCase();
-
-            const interactionCount = interaction.userInteractionCount ?? interaction.interactionCount;
-            const countToken = interactionCount !== undefined && interactionCount !== null
-              ? String(interactionCount).trim()
-              : "";
-
-            if (!countToken) {
-              continue;
-            }
-
-            if (!extracted.likes && (typeName.includes("like") || typeName.includes("favorite"))) {
-              extracted.likes = countToken;
-            }
-
-            if (!extracted.comments && typeName.includes("comment")) {
-              extracted.comments = countToken;
-            }
-          }
-
-          for (const value of Object.values(current)) {
-            if (value && typeof value === "object") {
-              stack.push(value);
-            }
-          }
-        }
-
-        return extracted;
-      }
-
-      const jsonLdValues = extractFromJsonLd();
-      if (jsonLdValues.likes) {
-        likes = jsonLdValues.likes;
-      }
-      if (jsonLdValues.comments) {
-        comments = jsonLdValues.comments;
-      }
-      if (jsonLdValues.caption) {
-        captionText = jsonLdValues.caption;
-      }
-      if (jsonLdValues.date) {
-        date = jsonLdValues.date;
-      }
-
-      const ogDescription = document.querySelector('meta[property="og:description"]')?.getAttribute("content") || "";
-      if (likes === "N/A") {
-        const likeFromOg = extractCountToken(ogDescription, "likes?");
-        if (likeFromOg) {
-          likes = likeFromOg;
-        }
-      }
-      if (comments === "N/A") {
-        const commentsFromOg = extractCountToken(ogDescription, "comments?");
-        if (commentsFromOg) {
-          comments = commentsFromOg;
-        }
-      }
-
-      if (comments === "N/A" && likes !== "N/A" && ogDescription) {
-        const mentionsComments = /comments?/i.test(ogDescription);
-        if (!mentionsComments) {
-          comments = "0";
-        }
-      }
-
-      const timeElement = document.querySelector("time");
-      if (date === "N/A" && timeElement && timeElement.getAttribute("datetime")) {
-        date = timeElement.getAttribute("datetime");
-      } else if (date === "N/A" && timeElement) {
-        date = timeElement.innerText;
-      }
-
-      if (date === "N/A") {
-        const publishedMeta = document.querySelector('meta[property="article:published_time"]')?.getAttribute("content")
-          || document.querySelector('meta[property="og:updated_time"]')?.getAttribute("content")
-          || "";
-        const normalizedDate = normalizeDate(publishedMeta);
-        if (normalizedDate) {
-          date = normalizedDate;
-        }
-      }
-
-      const pageHtml = document.documentElement?.innerHTML || "";
-
-      if (likes === "N/A") {
-        const likeJsonMatch = pageHtml.match(/"like_count":(\d+)/)
-          || pageHtml.match(/"edge_media_preview_like":\{"count":(\d+)/);
-        if (likeJsonMatch?.[1]) {
-          likes = likeJsonMatch[1];
-        }
-      }
-
-      if (comments === "N/A") {
-        const commentJsonMatch = pageHtml.match(/"comment_count":(\d+)/)
-          || pageHtml.match(/"edge_media_to_parent_comment":\{"count":(\d+)/)
-          || pageHtml.match(/"edge_media_preview_comment":\{"count":(\d+)/);
-        if (commentJsonMatch?.[1]) {
-          comments = commentJsonMatch[1];
-        }
-      }
-
-      if (date === "N/A") {
-        const timestampMatch = pageHtml.match(/"taken_at_timestamp":(\d+)/);
-        if (timestampMatch?.[1]) {
-          const timestampMillis = Number.parseInt(timestampMatch[1], 10) * 1000;
-          if (!Number.isNaN(timestampMillis)) {
-            date = new Date(timestampMillis).toISOString();
-          }
-        }
-      }
-
-      if (!captionText) {
-        const h1Tags = document.querySelectorAll("h1");
-        for (const h1 of h1Tags) {
-          if (
-            h1.innerText
-            && h1.innerText.trim().length > 0
-            && h1.innerText !== "Instagram"
-            && !h1.innerText.includes("Log in")
-          ) {
-            captionText = h1.innerText.trim();
-            break;
-          }
-        }
-      }
-
-      if (!captionText) {
-        const metaTitle = document.querySelector('meta[property="og:title"]');
-        if (metaTitle) {
-          captionText = metaTitle.content;
-        }
-      }
-
-      const text = document.body.innerText;
-      const lines = text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-
-      for (let i = lines.length - 1; i >= 0; i -= 1) {
-        const line = lines[i].toLowerCase();
-
-        if (
-          line.match(
-            /\s+ago$|^january\s|^february\s|^march\s|^april\s|^may\s|^june\s|^july\s|^august\s|^september\s|^october\s|^november\s|^december\s/i,
-          )
-          || line.includes("more posts from")
-          || line.includes("log in to like")
-        ) {
-          const foundNumbers = [];
-          let j = i - 1;
-          while (j >= i - 8 && j >= 0 && foundNumbers.length < 2) {
-            const lineAbove = lines[j];
-
-            if (/^[\d,.]+([kmbKMB])?$/.test(lineAbove)) {
-              foundNumbers.unshift(lineAbove);
-            } else if (/(?:view\s*all\s*)?([\d,KMBkmb.]+)\s+comments?/i.test(lineAbove)) {
-              const matcher = lineAbove.match(/(?:view\s*all\s*)?([\d,KMBkmb.]+)\s+comments?/i);
-              if (matcher) {
-                foundNumbers.unshift(matcher[1]);
-              }
-            } else if (/([\d,KMBkmb.]+)\s+likes?/i.test(lineAbove)) {
-              if (j + 1 < lines.length && !/reply/i.test(lines[j + 1])) {
-                const matcher = lineAbove.match(/([\d,KMBkmb.]+)\s+likes?/i);
-                if (matcher) {
-                  foundNumbers.unshift(matcher[1]);
-                }
-              }
-            }
-            j -= 1;
-          }
-
-          if (foundNumbers.length === 2) {
-            if (likes === "N/A") {
-              likes = foundNumbers[0];
-            }
-            if (comments === "N/A") {
-              comments = foundNumbers[1];
-            }
-            break;
-          }
-
-          if (foundNumbers.length === 1) {
-            if (likes === "N/A") {
-              likes = foundNumbers[0];
-            } else if (comments === "N/A") {
-              comments = foundNumbers[0];
-            }
-          }
-        }
-      }
-
-      return { likes, comments, captionText, date };
-    });
-
-    post.likes = stats.likes;
-    post.comments = stats.comments;
-    post.caption = stats.captionText || "No caption";
-    post.date = stats.date;
-
     const appliedCategories = customCategories || categories;
-    const promptText = `${classifierPrompt}\n\nHere is the post caption: "${post.caption}", and these are the categories: ${JSON.stringify(appliedCategories)}.`;
-    const classificationText = await fetchOpenRouter(promptText, post.img);
+    const promptText = `${classifierPrompt}\n\nHere is the post caption: "${enrichedPost.caption}", and these are the categories: ${JSON.stringify(appliedCategories)}.`;
+    const classificationText = await fetchOpenRouter(promptText, enrichedPost.img);
 
     let parsedResponse = {};
     try {
@@ -658,20 +268,14 @@ async function extractPostData(context, post, classifierPrompt, customCategories
       parsedResponse = {};
     }
 
-    post.intent = parsedResponse.intent || "Unknown";
-    post.format = parsedResponse.format || "Unknown";
+    enrichedPost.intent = parsedResponse.intent || "Unknown";
+    enrichedPost.format = parsedResponse.format || "Unknown";
   } catch {
-    post.likes = "N/A";
-    post.comments = "N/A";
-    post.caption = post.caption || "No caption";
-    post.date = "N/A";
-    post.intent = "Unknown";
-    post.format = "Unknown";
-  } finally {
-    await postPage.close();
+    enrichedPost.intent = "Unknown";
+    enrichedPost.format = "Unknown";
   }
 
-  return post;
+  return enrichedPost;
 }
 
 function parseLikes(value) {
@@ -1218,50 +822,20 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
   const rawData = {};
   const errors = [];
 
-  const browser = await chromium.launch({
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--disable-blink-features=AutomationControlled",
-    ],
-  });
-
-  try {
-    const contextOptions = {
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    };
-    const storageState = getStorageState();
-    if (storageState) {
-      contextOptions.storageState = storageState;
-    }
-
-    const context = await browser.newContext(contextOptions);
-    const cookies = await context.cookies();
-    console.log("cookies loaded into browser context:", cookies.length);
-
-    const page = await context.newPage();
-
-    for (const account of accounts) {
-      try {
-        let postData = await getAccountPosts(page, account, maxPosts);
-        for (let index = 0; index < postData.length; index += 1) {
-          postData[index] = await extractPostData(context, postData[index], prompts.classifierPrompt, customCategories);
-        }
-        rawData[account] = postData;
-      } catch (error) {
-        rawData[account] = [];
-        errors.push({
-          account,
-          message: error.message,
-        });
+  for (const account of accounts) {
+    try {
+      let postData = await getAccountPosts(account, maxPosts);
+      for (let index = 0; index < postData.length; index += 1) {
+        postData[index] = await extractPostData(postData[index], prompts.classifierPrompt, customCategories);
       }
+      rawData[account] = postData;
+    } catch (error) {
+      rawData[account] = [];
+      errors.push({
+        account,
+        message: error.message,
+      });
     }
-
-    await context.close();
-  } finally {
-    await browser.close();
   }
 
   const analysis = analyseData(rawData);
