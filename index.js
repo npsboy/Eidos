@@ -93,6 +93,27 @@ function parseModelJson(text) {
   return JSON.parse(cleaned);
 }
 
+function shouldStreamAnalysis(req) {
+  if (req.body?.stream === true) {
+    return true;
+  }
+
+  const acceptsSse = String(req.headers.accept || "").toLowerCase().includes("text/event-stream");
+  return acceptsSse;
+}
+
+function initializeSse(res) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+}
+
+function writeSseEvent(res, event, data) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
 function fetchJson(url, { method = "GET", body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : null;
@@ -823,14 +844,31 @@ async function generateExcelFile(globalInsights, runId) {
   return filePath;
 }
 
-async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExcel, customCategories }) {
+async function runAnalysis({
+  accounts,
+  maxPosts,
+  includeAiOverview,
+  generateExcel,
+  customCategories,
+  onProgress,
+}) {
   const prompts = getPrompts();
   const runId = `${Date.now()}`;
   const rawData = {};
   const errors = [];
 
+  const safeProgress = typeof onProgress === "function"
+    ? onProgress
+    : () => {};
+
   for (const account of accounts) {
     try {
+      safeProgress({
+        stage: "extracting_posts",
+        message: "Extracting posts...",
+        account,
+      });
+
       let postData = await getAccountPosts(account, maxPosts);
       if (postData.length < maxPosts) {
         console.log(
@@ -838,6 +876,14 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
         );
       }
       for (let index = 0; index < postData.length; index += 1) {
+        safeProgress({
+          stage: "analyzing_post",
+          message: `${account} | post ${index + 1} | ${postData[index]?.link || "N/A"}`,
+          account,
+          postNumber: index + 1,
+          link: postData[index]?.link || "N/A",
+        });
+
         postData[index] = await extractPostData(postData[index], prompts.classifierPrompt, customCategories);
       }
       rawData[account] = postData;
@@ -847,8 +893,19 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
         account,
         message: error.message,
       });
+
+      safeProgress({
+        stage: "account_error",
+        account,
+        message: error.message,
+      });
     }
   }
+
+  safeProgress({
+    stage: "analyzing_data",
+    message: "analysing data",
+  });
 
   const analysis = analyseData(rawData);
 
@@ -953,6 +1010,8 @@ app.post("/api/analyze", async (req, res, next) => {
     return;
   }
 
+  let stream = false;
+
   try {
     const requestedAccounts = Array.isArray(req.body?.accounts)
       ? req.body.accounts.map((item) => String(item).trim()).filter(Boolean)
@@ -961,6 +1020,7 @@ app.post("/api/analyze", async (req, res, next) => {
     const maxPosts = Number.parseInt(String(req.body?.maxPosts ?? DEFAULT_MAX_POSTS), 10);
     const includeAiOverview = Boolean(req.body?.includeAiOverview);
     const generateExcel = Boolean(req.body?.generateExcel);
+    stream = shouldStreamAnalysis(req);
 
     if (requestedAccounts.length === 0) {
       res.status(400).json({ error: "accounts must contain at least one Instagram handle" });
@@ -974,17 +1034,45 @@ app.post("/api/analyze", async (req, res, next) => {
 
     isAnalysisRunning = true;
 
+    if (stream) {
+      initializeSse(res);
+    }
+
     const result = await runAnalysis({
       accounts: requestedAccounts,
       maxPosts,
       includeAiOverview,
       generateExcel,
       customCategories: req.body?.categories,
+      onProgress: stream
+        ? (event) => writeSseEvent(res, "progress", event)
+        : undefined,
     });
 
     latestRun = result;
+
+    if (stream) {
+      writeSseEvent(res, "final", result);
+      writeSseEvent(res, "done", { message: "analysis complete" });
+      res.end();
+      return;
+    }
+
     res.json(result);
   } catch (error) {
+    if (stream && !res.headersSent) {
+      initializeSse(res);
+      writeSseEvent(res, "error", { message: error.message || "Internal Server Error" });
+      res.end();
+      return;
+    }
+
+    if (stream && res.headersSent) {
+      writeSseEvent(res, "error", { message: error.message || "Internal Server Error" });
+      res.end();
+      return;
+    }
+
     next(error);
   } finally {
     isAnalysisRunning = false;

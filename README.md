@@ -175,6 +175,88 @@ Notes:
 - `categories` is optional; falls back to default categories if not provided.
 - One analysis run is allowed at a time.
 
+### Streaming Progress (SSE)
+
+`POST /api/analyze` supports Server-Sent Events (SSE) progress streaming.
+
+Enable streaming in either way:
+
+- Add `"stream": true` in request JSON body.
+- Or send header `Accept: text/event-stream`.
+
+When streaming is enabled, the response is SSE (not a single JSON response). The API sends `progress` events during execution, then a `final` event with the full analysis output.
+
+#### Progress Event Format
+
+Each progress update is sent as:
+
+```text
+event: progress
+data: { ... }
+```
+
+Progress payload examples:
+
+1. While extracting posts via Apify:
+
+```json
+{
+  "stage": "extracting_posts",
+  "message": "Extracting posts...",
+  "account": "plaeto.schools"
+}
+```
+
+2. While analyzing individual posts:
+
+```json
+{
+  "stage": "analyzing_post",
+  "message": "plaeto.schools | post 1 | https://www.instagram.com/p/ABC123/",
+  "account": "plaeto.schools",
+  "postNumber": 1,
+  "link": "https://www.instagram.com/p/ABC123/"
+}
+```
+
+3. While generating analytics from collected posts:
+
+```json
+{
+  "stage": "analyzing_data",
+  "message": "analysing data"
+}
+```
+
+#### Final Analysis Event Format
+
+At completion, the API streams:
+
+```text
+event: final
+data: { ...full analyze payload... }
+
+event: done
+data: { "message": "analysis complete" }
+```
+
+The `final` event contains the same structure as the non-streaming JSON response (fields like `runId`, `createdAt`, `accounts`, `maxPosts`, `rawData`, `analysis`, `aiOverview`, `excelPath`, `errors`).
+
+#### Example Streaming Request
+
+```bash
+curl -N -X POST http://localhost:8080/api/analyze \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "accounts": ["plaeto.schools"],
+    "maxPosts": 2,
+    "includeAiOverview": false,
+    "generateExcel": false,
+    "stream": true
+  }'
+```
+
 Response body:
 
 ```json
