@@ -967,8 +967,8 @@ app.post("/api/analyze", async (req, res, next) => {
       return;
     }
 
-    if (!Number.isInteger(maxPosts) || maxPosts < 1 || maxPosts > 25) {
-      res.status(400).json({ error: "maxPosts must be an integer between 1 and 25" });
+    if (!Number.isInteger(maxPosts) || maxPosts < 1 || maxPosts > 100) {
+      res.status(400).json({ error: "maxPosts must be an integer between 1 and 100" });
       return;
     }
 
