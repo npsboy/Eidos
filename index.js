@@ -215,9 +215,13 @@ async function getAccountPosts(account, maxPosts) {
     throw new Error("APIFY_TOKEN is missing");
   }
 
+  const requestedLimit = Number.isInteger(maxPosts) && maxPosts > 0
+    ? maxPosts
+    : DEFAULT_MAX_POSTS;
+
   const input = {
     dataDetailLevel: "basicData",
-    resultsLimit: maxPosts,
+    resultsLimit: requestedLimit,
     skipPinnedPosts: false,
     username: [account],
   };
@@ -228,7 +232,10 @@ async function getAccountPosts(account, maxPosts) {
     ? response
     : (Array.isArray(response?.items) ? response.items : []);
 
-  return posts.slice(0, maxPosts).map((item) => {
+  // If the account has fewer posts than requested, return all available posts.
+  const availablePosts = posts.slice(0, requestedLimit);
+
+  return availablePosts.map((item) => {
     const sourceUrl = item?.url || item?.inputUrl || (item?.shortCode ? `https://www.instagram.com/p/${item.shortCode}/` : "");
     const normalizedType = String(item?.type || "").toLowerCase();
     const productType = String(item?.productType || "").toLowerCase();
@@ -825,6 +832,11 @@ async function runAnalysis({ accounts, maxPosts, includeAiOverview, generateExce
   for (const account of accounts) {
     try {
       let postData = await getAccountPosts(account, maxPosts);
+      if (postData.length < maxPosts) {
+        console.log(
+          `Requested ${maxPosts} posts for ${account}, received ${postData.length}. Proceeding with available posts.`,
+        );
+      }
       for (let index = 0; index < postData.length; index += 1) {
         postData[index] = await extractPostData(postData[index], prompts.classifierPrompt, customCategories);
       }

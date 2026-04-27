@@ -84,6 +84,71 @@ Response body:
 }
 ```
 
+## Apify Instagram Scraper
+
+The service uses the Apify `apify/instagram-post-scraper` actor to fetch Instagram posts.
+
+### Apify Request Format
+
+For each account, the following request is sent to the Apify actor:
+
+```json
+{
+  "dataDetailLevel": "basicData",
+  "resultsLimit": 5,
+  "skipPinnedPosts": false,
+  "username": ["plaeto.schools"]
+}
+```
+
+- `dataDetailLevel`: Set to `basicData` for standard post details
+- `resultsLimit`: Number of posts to retrieve (passed from `maxPosts` parameter)
+- `skipPinnedPosts`: Whether to skip pinned posts
+- `username`: Array of Instagram handles to scrape
+
+### Apify Response Format
+
+The actor returns an array of post objects with the following structure:
+
+```json
+[
+  {
+    "inputUrl": "https://www.instagram.com/p/DLNsnpUTdVS/",
+    "id": "3660778310592222546",
+    "type": "Image",
+    "shortCode": "DLNsnpUTdVS",
+    "caption": "Your phone isn't rotting your brain...",
+    "hashtags": [],
+    "mentions": [],
+    "url": "https://www.instagram.com/p/DLNsnpUTdVS/",
+    "commentsCount": 230,
+    "firstComment": "Amen.",
+    "latestComments": [...],
+    "dimensionsHeight": 1350,
+    "dimensionsWidth": 1080,
+    "displayUrl": "https://scontent-dfw5-3.cdninstagram.com/v/t51.2885-15/...",
+    "images": [],
+    "alt": "Photo by National Geographic...",
+    "likesCount": 73473,
+    "timestamp": "2025-06-22T19:00:10.000Z",
+    "childPosts": [],
+    "ownerFullName": "National Geographic",
+    "ownerUsername": "natgeo",
+    "ownerId": "787132",
+    "isCommentsDisabled": false
+  }
+]
+```
+
+Key fields extracted and normalized:
+- `url`/`inputUrl` → `link`: Post URL
+- `displayUrl`/`images[0]` → `img`: Cover image
+- `type`/`productType` → `type`: Normalized to `post` or `reel`
+- `likesCount` → `likes`: Like count
+- `commentsCount` → `comments`: Comment count
+- `caption` → `caption`: Post caption text
+- `timestamp` → `date`: ISO 8601 date
+
 ### `POST /api/analyze`
 Runs end-to-end scrape + classify + analytics.
 
@@ -106,6 +171,7 @@ Notes:
 
 - `accounts` is optional; falls back to `DEFAULT_ACCOUNTS`.
 - `maxPosts` must be between 1 and 25.
+- If `maxPosts` is higher than the number of available posts for an account, the service returns all available posts without failing.
 - `categories` is optional; falls back to default categories if not provided.
 - One analysis run is allowed at a time.
 
