@@ -385,7 +385,7 @@ Downloads the latest generated Excel file (if `generateExcel` was true).
 
 - Build method: Dockerfile
 - Runtime command (inside container): `npm start`
-- Container port: `3000`
+- Container port: `8080`
 
 ## Security Notes
 
