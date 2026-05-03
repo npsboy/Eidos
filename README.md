@@ -1,6 +1,7 @@
 # Eidos Backend Service
 
-Express backend for Instagram scraping via Apify, post classification, and insight generation.
+Express backend for Instagram scraping via Apify, post classification, and insight generation. </br>
+[View frontend here](https://eidos.npsboy.net/)
 
 ## Deploy Target
 
